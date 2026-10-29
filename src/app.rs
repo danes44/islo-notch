@@ -1961,6 +1961,12 @@ impl App {
         }
     }
 
+    fn raise_islands(&self) {
+        for v in self.views.iter().filter(|v| v.shown) {
+            system::raise_topmost(v.win.hwnd());
+        }
+    }
+
     fn place_all(&mut self) {
         for i in 0..self.views.len() {
             self.place(i);
@@ -4045,9 +4051,13 @@ impl App {
             system::WM_APP_FOREGROUND => {
                 self.check_fullscreen();
                 if self.cfg.taskbar {
-                    // the taskbar comes forward when it's clicked; stay on top of it
-                    for v in self.views.iter().filter(|v| v.shown) {
-                        system::raise_topmost(v.win.hwnd());
+                    // the taskbar comes forward when it's clicked; stay on top of it.
+                    // Show desktop (Win + D) raises it once more a moment later.
+                    self.raise_islands();
+                    for ms in [150, 600] {
+                        slint::Timer::single_shot(Duration::from_millis(ms), || {
+                            with_app(|a| a.raise_islands());
+                        });
                     }
                 }
                 if self.cfg.show_on == 2 {
