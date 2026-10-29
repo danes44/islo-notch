@@ -683,6 +683,9 @@ export component Island inherits Window {
     in property <string> header-clock: ""; // open header: the same, shortened when the tabs need the room
     // ---- 0.3.12 ----
     in property <bool> soft-shadow: true;
+    // taskbar mode: a notch as tall as the taskbar, no shadow, no shoulders
+    in property <bool> in-taskbar: false;
+    in property <length> compact-h: 36px;
     in property <bool> keep-open: false;   // pinned open
     in property <bool> hovering: false;    // pointer on the island (tab arrows show)
     in property <int> panel-index: 0;      // the open tab's place in `panels`
@@ -763,7 +766,7 @@ export component Island inherits Window {
     property <length> sh-pad: 16px; // = PAD in src/shadow.rs
     property <length> sh-drop: 2px;
     property <float> sh-open: clamp((root.radius - 14px) / 16px, 0, 1);
-    if root.soft-shadow && root.edge != 4 && !(root.tab && root.side-style == 1) : Rectangle {
+    if root.soft-shadow && root.edge != 4 && !root.in-taskbar && !(root.tab && root.side-style == 1) : Rectangle {
         for r in [14, 30] : Image {
             property <length> back: r * 1px; // how far past the screen edge the flat side goes
             property <float> weight: r == 14 ? 1 - root.sh-open : root.sh-open;
@@ -780,6 +783,8 @@ export component Island inherits Window {
     // ================= notch shoulders =================
     // Concave fillets that join the flat edge of the island to the screen edge.
     property <length> s: root.edge == 4 ? 0px : T.shoulder;
+    // compact rows are drawn 36 px tall; in the taskbar they sit centered in the taller notch
+    property <length> inset: max(0px, (root.compact-h - 36px) / 2);
     property <bool> on-side: root.edge == 2 || root.edge == 3;
     // Thin sliver: the visible strip is 8 px, but the hover target stays 36 px.
     // Nearly-transparent pixels (alpha 2/255) still catch the pointer.
@@ -1002,7 +1007,7 @@ export component Island inherits Window {
             property <bool> on: root.mode == 0 && !root.tab;
             width: parent.width;
             height: 36px;
-            y: root.edge == 1 ? parent.height - self.height : 0;
+            y: root.edge == 1 ? parent.height - self.height - root.inset : root.inset;
 
             // 19 at a glance: the featured feature, then date + battery
             Layer {
@@ -1110,7 +1115,8 @@ export component Island inherits Window {
                                 border-color: root.accent;
                             }
                         }
-                        Label {
+                        // in the taskbar: art and waveform sit in the wings, the middle stays a notch
+                        if !root.in-taskbar : Label {
                             text: root.compact-title;
                             overflow: elide;
                             horizontal-stretch: 1;
@@ -1287,7 +1293,7 @@ export component Island inherits Window {
             fade-in: root.quick;
             fade-out: root.instant;
             height: 36px;
-            y: root.edge == 1 ? parent.height - self.height : 0;
+            y: root.edge == 1 ? parent.height - self.height - root.inset : root.inset;
             HorizontalLayout {
                 padding-left: 12px;
                 padding-right: 12px;
@@ -1317,7 +1323,7 @@ export component Island inherits Window {
             fade-in: root.quick;
             fade-out: root.instant;
             height: 36px;
-            y: root.edge == 1 ? parent.height - self.height : 0;
+            y: root.edge == 1 ? parent.height - self.height - root.inset : root.inset;
             HorizontalLayout {
                 padding-left: 12px;
                 padding-right: 12px;
@@ -1351,7 +1357,7 @@ export component Island inherits Window {
             fade-in: root.quick;
             fade-out: root.instant;
             height: 36px;
-            y: root.edge == 1 ? parent.height - self.height : 0;
+            y: root.edge == 1 ? parent.height - self.height - root.inset : root.inset;
             HorizontalLayout {
                 padding-left: 12px;
                 padding-right: 12px;
@@ -1372,7 +1378,7 @@ export component Island inherits Window {
             fade-in: root.quick;
             fade-out: root.instant;
             height: 36px;
-            y: root.edge == 1 ? parent.height - self.height : 0;
+            y: root.edge == 1 ? parent.height - self.height - root.inset : root.inset;
             HorizontalLayout {
                 padding-left: 12px;
                 padding-right: 12px;
@@ -1397,7 +1403,7 @@ export component Island inherits Window {
             fade-in: root.quick;
             fade-out: root.instant;
             height: 36px;
-            y: root.edge == 1 ? parent.height - self.height : 0;
+            y: root.edge == 1 ? parent.height - self.height - root.inset : root.inset;
             HorizontalLayout {
                 padding-left: 12px;
                 padding-right: 12px;
@@ -1417,7 +1423,7 @@ export component Island inherits Window {
             fade-in: root.quick;
             fade-out: root.instant;
             height: 36px;
-            y: root.edge == 1 ? parent.height - self.height : 0;
+            y: root.edge == 1 ? parent.height - self.height - root.inset : root.inset;
             HorizontalLayout {
                 padding-left: 16px;
                 padding-right: 16px;

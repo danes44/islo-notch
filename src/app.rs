@@ -41,6 +41,8 @@ const ISLAND_R: f32 = 30.0; // radius-island: expanded corners
 const PAD: f32 = 16.0;
 const HEADER: f32 = 34.0; // switcher row + gap
 const SHOULDER: f32 = 10.0;
+/// Taskbar mode: a live pill is the notch (about 160) plus a wing each side.
+const TB_WINGS_W: f32 = 300.0;
 const TAB_W: f32 = 36.0;
 const SLIVER_W: f32 = 8.0;
 const GLYPH: f32 = 36.0; // one glyph slot in the side tab
@@ -187,6 +189,9 @@ struct App {
     flash_wide: bool,
     hidden_user: bool,
     sys_anim: bool,
+    /// Taskbar thickness in logical px while in taskbar mode (0 otherwise):
+    /// the quiet island is exactly as tall, like a notch in the menu bar.
+    taskbar_h: f32,
 
     media: Option<MediaState>,
     art_id: u64,
@@ -455,7 +460,8 @@ impl App {
         if self.cfg.shelf && !self.shelf.is_empty() {
             return C_SHELF;
         }
-        if self.cfg.pill_glance {
+        // (in the taskbar the clock, date and battery are already beside it)
+        if self.cfg.pill_glance && !self.cfg.taskbar {
             return C_GLANCE; // date + battery, with the featured feature (Mochi naps here too)
         }
         if self.cfg.pet {
@@ -1660,7 +1666,7 @@ impl App {
         let mode = self.mode(v);
         let (mut w, mut h, r) = match mode {
             2 => (EXPANDED_W, self.panel_height(v), ISLAND_R),
-            1 => (HUD_W, COMPACT_H, NOTCH_R),
+            1 => (HUD_W, self.compact_h(), NOTCH_R),
             _ if self.tab(v) => {
                 let w = if self.cfg.side_style == 1 { SLIVER_W } else { TAB_W };
                 (w, self.tab_height(), if self.cfg.side_style == 1 { 4.0 } else { NOTCH_R })
@@ -1690,7 +1696,10 @@ impl App {
                     }
                     _ => base,
                 };
-                (w, COMPACT_H, NOTCH_R)
+                // taskbar mode: live things sit in wings either side of an
+                // empty notch, like the notch apps on a MacBook
+                let w = if self.cfg.taskbar && !matches!(kind, C_IDLE | C_PET | C_GLANCE) { w.max(TB_WINGS_W) } else { w };
+                (w, self.compact_h(), NOTCH_R)
             }
         };
         if mode == 0 && !self.tab(v) {
@@ -1709,6 +1718,11 @@ impl App {
             _ => v.tab_center,
         };
         (w, h, r, anchor)
+    }
+
+    /// Height of the compact pill: the taskbar's in taskbar mode.
+    fn compact_h(&self) -> f32 {
+        if self.cfg.taskbar && self.taskbar_h > 0.0 { self.taskbar_h } else { COMPACT_H }
     }
 
     fn tab_top(&self, v: &View) -> f32 {
@@ -1745,6 +1759,7 @@ impl App {
         let header_clock = self.header_clock(&self.views[i]);
         let panel_index = panels.iter().position(|p| *p == self.views[i].panel).unwrap_or(0) as i32;
         let (keep_open, soft, align, touch) = (self.cfg.keep_open, self.cfg.soft_shadow, self.cfg.lyric_align, self.cfg.pet_touch && self.cfg.pet);
+        let (in_taskbar, compact_h) = (self.cfg.taskbar && !self.views[i].dragging, self.compact_h());
         let v = &mut self.views[i];
         let growing = w > v.w.target + 0.5 || h > v.h.target + 0.5;
         for s in [&mut v.w, &mut v.h, &mut v.r, &mut v.a] {
@@ -1788,6 +1803,8 @@ impl App {
         isl.set_soft_shadow(soft);
         isl.set_lyric_align(align);
         isl.set_pet_touch(touch);
+        isl.set_in_taskbar(in_taskbar);
+        isl.set_compact_h(compact_h);
     }
 
     /// Called every loop iteration. Returns true while springs are moving.
@@ -1956,6 +1973,11 @@ impl App {
             system::set_taskbar_alignment(self.cfg.taskbar_al as u32);
             self.cfg.taskbar_al = -1;
         }
+        self.taskbar_h = if self.cfg.taskbar {
+            system::taskbar_thickness() as f32 / system::monitor_scale(system::primary_monitor())
+        } else {
+            0.0
+        };
         if before != (self.cfg.taskbar, self.cfg.taskbar_al, self.cfg.edge) {
             self.cfg.save();
         }
@@ -4079,9 +4101,9 @@ impl App {
             }
             WM_SETTINGCHANGE => {
                 // the taskbar may have moved to another edge
-                let edge = self.cfg.edge;
+                let (edge, th) = (self.cfg.edge, self.taskbar_h);
                 self.sync_taskbar();
-                if self.cfg.edge != edge {
+                if self.cfg.edge != edge || self.taskbar_h != th {
                     self.push_settings();
                     self.retarget();
                 }
@@ -4573,6 +4595,7 @@ pub fn run() -> Result<(), slint::PlatformError> {
         flash_wide: false,
         hidden_user: false,
         sys_anim: system::system_animations_enabled(),
+        taskbar_h: 0.0,
         media: None,
         art_id: 0,
         art: slint::Image::default(),

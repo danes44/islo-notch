@@ -264,6 +264,16 @@ pub fn taskbar_edge() -> Option<crate::config::Edge> {
     }
 }
 
+/// How thick the (main) taskbar is, in physical px (0 if unknown).
+pub fn taskbar_thickness() -> i32 {
+    let mut abd = APPBARDATA { cbSize: std::mem::size_of::<APPBARDATA>() as u32, ..Default::default() };
+    if unsafe { SHAppBarMessage(ABM_GETTASKBARPOS, &mut abd) } == 0 {
+        return 0;
+    }
+    let r = abd.rc;
+    if abd.uEdge == ABE_TOP || abd.uEdge == ABE_BOTTOM { r.bottom - r.top } else { r.right - r.left }
+}
+
 /// Put an island back above the taskbar (clicking the taskbar raises it over
 /// every other topmost window).
 pub fn raise_topmost(hwnd: HWND) {
