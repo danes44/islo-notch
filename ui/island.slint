@@ -686,6 +686,7 @@ export component Island inherits Window {
     // taskbar mode: a notch as tall as the taskbar, no shadow, no shoulders
     in property <bool> in-taskbar: false;
     in property <length> compact-h: 36px;
+    in property <bool> lyric-line: false; // the media pill shows the current lyric line
     in property <bool> keep-open: false;   // pinned open
     in property <bool> hovering: false;    // pointer on the island (tab arrows show)
     in property <int> panel-index: 0;      // the open tab's place in `panels`
@@ -784,7 +785,14 @@ export component Island inherits Window {
     // Concave fillets that join the flat edge of the island to the screen edge.
     property <length> s: root.edge == 4 ? 0px : T.shoulder;
     // compact rows are drawn 36 px tall; in the taskbar they sit centered in the taller notch
-    property <length> inset: max(0px, (root.compact-h - 36px) / 2);
+    // (negative in a thinner taskbar: the row then overhangs both sides equally)
+    property <length> inset: (root.compact-h - 36px) / 2;
+    // side padding of the compact rows: in the taskbar the ends are rounder, so more room
+    property <length> pad-x: root.in-taskbar ? max(12px, root.radius) : 12px;
+    // album art in the notch: a bit smaller in a thin taskbar, with the same gap
+    // to its left as above and below it
+    property <length> art-size: root.in-taskbar ? min(22px, root.compact-h - 12px) : 22px;
+    property <length> art-gap: (root.compact-h - root.art-size) / 2;
     property <bool> on-side: root.edge == 2 || root.edge == 3;
     // Thin sliver: the visible strip is 8 px, but the hover target stays 36 px.
     // Nearly-transparent pixels (alpha 2/255) still catch the pointer.
@@ -1088,16 +1096,16 @@ export component Island inherits Window {
                 fade-in: root.quick;
                 fade-out: root.instant;
                 HorizontalLayout {
-                    padding-left: 12px;
-                    padding-right: 12px;
+                    padding-left: root.in-taskbar ? root.art-gap : root.pad-x;
+                    padding-right: root.in-taskbar ? root.art-gap + 4px : root.pad-x;
                     spacing: 8px;
                     alignment: space-between;
                     HorizontalLayout {
-                        spacing: 6px;
+                        spacing: 8px;
                         horizontal-stretch: 1;
                         Rectangle {
-                            width: 22px;
-                            height: 22px;
+                            width: root.art-size;
+                            height: root.art-size;
                             y: (parent.height - self.height) / 2;
                             border-radius: 6px;
                             background: T.tile;
@@ -1115,8 +1123,9 @@ export component Island inherits Window {
                                 border-color: root.accent;
                             }
                         }
-                        // in the taskbar: art and waveform sit in the wings, the middle stays a notch
-                        if !root.in-taskbar : Label {
+                        // in the taskbar: art and waveform sit in the wings, the middle stays
+                        // a notch, unless it's showing the current lyric line
+                        if !root.in-taskbar || root.lyric-line : Label {
                             text: root.compact-title;
                             overflow: elide;
                             horizontal-stretch: 1;
@@ -1153,8 +1162,8 @@ export component Island inherits Window {
                 fade-in: root.quick;
                 fade-out: root.instant;
                 HorizontalLayout {
-                    padding-left: 12px;
-                    padding-right: 12px;
+                    padding-left: root.pad-x;
+                    padding-right: root.pad-x;
                     alignment: space-between;
                     HorizontalLayout {
                         spacing: 4px;
@@ -1176,8 +1185,8 @@ export component Island inherits Window {
                 fade-in: root.quick;
                 fade-out: root.instant;
                 HorizontalLayout {
-                    padding-left: 12px;
-                    padding-right: 12px;
+                    padding-left: root.pad-x;
+                    padding-right: root.pad-x;
                     alignment: space-between;
                     HorizontalLayout {
                         spacing: 4px;
@@ -1200,8 +1209,8 @@ export component Island inherits Window {
                 fade-in: root.quick;
                 fade-out: root.instant;
                 HorizontalLayout {
-                    padding-left: 12px;
-                    padding-right: 12px;
+                    padding-left: root.pad-x;
+                    padding-right: root.pad-x;
                     alignment: space-between;
                     HorizontalLayout {
                         spacing: 4px;
@@ -1228,8 +1237,8 @@ export component Island inherits Window {
                 fade-in: root.quick;
                 fade-out: root.instant;
                 HorizontalLayout {
-                    padding-left: 12px;
-                    padding-right: 12px;
+                    padding-left: root.pad-x;
+                    padding-right: root.pad-x;
                     alignment: space-between;
                     Label { text: "Battery low"; }
                     BatteryRing {
@@ -1246,8 +1255,8 @@ export component Island inherits Window {
                 fade-in: root.quick;
                 fade-out: root.instant;
                 HorizontalLayout {
-                    padding-left: 12px;
-                    padding-right: 12px;
+                    padding-left: root.pad-x;
+                    padding-right: root.pad-x;
                     alignment: space-between;
                     HorizontalLayout {
                         spacing: 4px;
@@ -1297,8 +1306,8 @@ export component Island inherits Window {
             height: 36px;
             y: root.edge == 1 ? parent.height - self.height - root.inset : root.inset;
             HorizontalLayout {
-                padding-left: 12px;
-                padding-right: 12px;
+                padding-left: root.pad-x;
+                padding-right: root.pad-x;
                 spacing: 8px;
                 alignment: space-between;
                 HorizontalLayout {
@@ -1327,8 +1336,8 @@ export component Island inherits Window {
             height: 36px;
             y: root.edge == 1 ? parent.height - self.height - root.inset : root.inset;
             HorizontalLayout {
-                padding-left: 12px;
-                padding-right: 12px;
+                padding-left: root.pad-x;
+                padding-right: root.pad-x;
                 alignment: space-between;
                 HorizontalLayout {
                     spacing: 6px;
@@ -1361,8 +1370,8 @@ export component Island inherits Window {
             height: 36px;
             y: root.edge == 1 ? parent.height - self.height - root.inset : root.inset;
             HorizontalLayout {
-                padding-left: 12px;
-                padding-right: 12px;
+                padding-left: root.pad-x;
+                padding-right: root.pad-x;
                 alignment: space-between;
                 HorizontalLayout {
                     spacing: 6px;
@@ -1382,8 +1391,8 @@ export component Island inherits Window {
             height: 36px;
             y: root.edge == 1 ? parent.height - self.height - root.inset : root.inset;
             HorizontalLayout {
-                padding-left: 12px;
-                padding-right: 12px;
+                padding-left: root.pad-x;
+                padding-right: root.pad-x;
                 alignment: space-between;
                 HorizontalLayout {
                     spacing: 6px;
@@ -1407,8 +1416,8 @@ export component Island inherits Window {
             height: 36px;
             y: root.edge == 1 ? parent.height - self.height - root.inset : root.inset;
             HorizontalLayout {
-                padding-left: 12px;
-                padding-right: 12px;
+                padding-left: root.pad-x;
+                padding-right: root.pad-x;
                 alignment: space-between;
                 HorizontalLayout {
                     spacing: 6px;

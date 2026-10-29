@@ -1666,7 +1666,7 @@ impl App {
         let mode = self.mode(v);
         let (mut w, mut h, r) = match mode {
             2 => (EXPANDED_W, self.panel_height(v), ISLAND_R),
-            1 => (HUD_W, self.compact_h(), NOTCH_R),
+            1 => (HUD_W, self.compact_h(), self.compact_r()),
             _ if self.tab(v) => {
                 let w = if self.cfg.side_style == 1 { SLIVER_W } else { TAB_W };
                 (w, self.tab_height(), if self.cfg.side_style == 1 { 4.0 } else { NOTCH_R })
@@ -1699,7 +1699,7 @@ impl App {
                 // taskbar mode: live things sit in wings either side of an
                 // empty notch, like the notch apps on a MacBook
                 let w = if self.cfg.taskbar && !matches!(kind, C_IDLE | C_PET | C_GLANCE) { w.max(TB_WINGS_W) } else { w };
-                (w, self.compact_h(), NOTCH_R)
+                (w, self.compact_h(), self.compact_r())
             }
         };
         if mode == 0 && !self.tab(v) {
@@ -1720,9 +1720,20 @@ impl App {
         (w, h, r, anchor)
     }
 
+    /// The music color: the album art's, or plain white when that's turned off.
+    fn shown_accent(&self) -> slint::Color {
+        if self.cfg.art_tint { self.accent } else { slint::Color::from_rgb_u8(0xff, 0xff, 0xff) }
+    }
+
     /// Height of the compact pill: the taskbar's in taskbar mode.
     fn compact_h(&self) -> f32 {
         if self.cfg.taskbar && self.taskbar_h > 0.0 { self.taskbar_h } else { COMPACT_H }
+    }
+
+    /// Corner radius of the compact pill: in the taskbar a softer, rounder
+    /// bottom (half the height, up to 18).
+    fn compact_r(&self) -> f32 {
+        if self.cfg.taskbar { (self.compact_h() / 2.0).min(18.0).max(NOTCH_R) } else { NOTCH_R }
     }
 
     fn tab_top(&self, v: &View) -> f32 {
@@ -1760,6 +1771,7 @@ impl App {
         let panel_index = panels.iter().position(|p| *p == self.views[i].panel).unwrap_or(0) as i32;
         let (keep_open, soft, align, touch) = (self.cfg.keep_open, self.cfg.soft_shadow, self.cfg.lyric_align, self.cfg.pet_touch && self.cfg.pet);
         let (in_taskbar, compact_h) = (self.cfg.taskbar && !self.views[i].dragging, self.compact_h());
+        let lyric_line = kind == C_MEDIA && self.synced_on();
         let v = &mut self.views[i];
         let growing = w > v.w.target + 0.5 || h > v.h.target + 0.5;
         for s in [&mut v.w, &mut v.h, &mut v.r, &mut v.a] {
@@ -1805,6 +1817,7 @@ impl App {
         isl.set_pet_touch(touch);
         isl.set_in_taskbar(in_taskbar);
         isl.set_compact_h(compact_h);
+        isl.set_lyric_line(lyric_line);
     }
 
     /// Called every loop iteration. Returns true while springs are moving.
@@ -1923,7 +1936,7 @@ impl App {
         isl.set_header_clock(self.header_clock(&self.views[i]).into());
         isl.set_art(self.art.clone());
         isl.set_has_art(self.media.as_ref().is_some_and(|m| m.info.art.is_some()));
-        isl.set_accent(self.accent);
+        isl.set_accent(self.shown_accent());
         if let Some(m) = &self.media {
             isl.set_track_title(m.info.title.clone().into());
             isl.set_subtitle(subtitle(&m.info).into());
@@ -3097,7 +3110,7 @@ impl App {
                             self.accent = slint::Color::from_rgb_u8(0xfc, 0x90, 0xbc); // island-rose
                         }
                     }
-                    let (art, accent, has) = (self.art.clone(), self.accent, info.art.is_some());
+                    let (art, accent, has) = (self.art.clone(), self.shown_accent(), info.art.is_some());
                     self.each(|isl| {
                         isl.set_art(art.clone());
                         isl.set_has_art(has);
@@ -3740,6 +3753,10 @@ impl App {
         if c.update_check != old.update_check {
             self.schedule_update_checks();
         }
+        if c.art_tint != old.art_tint {
+            let accent = self.shown_accent();
+            self.each(|isl| isl.set_accent(accent));
+        }
         let looks = (c.pet_skin, c.pet_body, c.pet_eyes, c.pet_size) != (old.pet_skin, old.pet_body, old.pet_eyes, old.pet_size);
         if looks {
             for v in &self.views {
@@ -4197,6 +4214,7 @@ fn fill_settings(s: &SettingsWindow, c: &Config) {
     s.set_games(c.games);
     s.set_games_online(c.games_online);
     s.set_mod_media(c.media);
+    s.set_art_tint(c.art_tint);
     s.set_mod_lyrics(c.lyrics);
     s.set_lyric_lines(c.lyric_lines as f32);
     s.set_mod_hud(c.hud);
@@ -4279,6 +4297,7 @@ fn read_settings(s: &SettingsWindow, c: &mut Config) {
     c.games = s.get_games();
     c.games_online = s.get_games_online();
     c.media = s.get_mod_media();
+    c.art_tint = s.get_art_tint();
     c.lyrics = s.get_mod_lyrics();
     c.lyric_lines = (s.get_lyric_lines().round() as i32).clamp(1, 10);
     c.hud = s.get_mod_hud();

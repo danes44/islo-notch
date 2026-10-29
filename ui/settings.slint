@@ -488,6 +488,7 @@ export component SettingsWindow inherits Window {
     in property <bool> online-built: false; // this build knows the relay
     // ---- modules ----
     in-out property <bool> mod-media: true;
+    in-out property <bool> art-tint: true;
     in-out property <bool> mod-lyrics: true;
     in-out property <float> lyric-lines: 3;
     in-out property <bool> mod-hud: true;
@@ -831,6 +832,13 @@ export component SettingsWindow inherits Window {
                             desc: "Show what's playing from Spotify, browsers and other apps.";
                             saved: root.saved-key == "media";
                             Toggle { y: 18px; checked <=> root.mod-media; toggled => { root.changed("media"); } }
+                        }
+                        Row {
+                            name: "Colors from album art";
+                            new-badge: true;
+                            desc: "The waveform, the art's border and the controls take the album's color. Off: plain white.";
+                            saved: root.saved-key == "arttint";
+                            Toggle { y: 18px; checked <=> root.art-tint; toggled => { root.changed("arttint"); } }
                         }
                         Row {
                             name: "Rest after music pauses";
