@@ -1107,8 +1107,10 @@ export component Island inherits Window {
                             width: root.art-size;
                             height: root.art-size;
                             y: (parent.height - self.height) / 2;
-                            border-radius: 6px;
-                            background: T.tile;
+                            // in the notch: a plain tile with a faint hairline instead of the
+                            // colored frame, so the small art keeps its room and stays clean
+                            border-radius: root.in-taskbar ? 5px : 6px;
+                            background: root.in-taskbar && root.has-art ? transparent : T.tile;
                             clip: true;
                             Image {
                                 visible: root.has-art;
@@ -1118,9 +1120,9 @@ export component Island inherits Window {
                                 image-fit: cover;
                             }
                             Rectangle {
-                                border-radius: 6px;
-                                border-width: 2px;
-                                border-color: root.accent;
+                                border-radius: parent.border-radius;
+                                border-width: root.in-taskbar ? 1px : 2px;
+                                border-color: root.in-taskbar ? #ffffff29 : root.accent;
                             }
                         }
                         // in the taskbar: art and waveform sit in the wings, the middle stays
