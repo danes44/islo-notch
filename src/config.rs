@@ -90,6 +90,10 @@ pub struct Config {
     pub games: bool,        // the tic-tac-toe tab
     pub games_online: bool, // play friends through the relay with a room code
     pub game_level: i32,    // 0 easy, 1 medium, 2 hard
+    // taskbar mode
+    pub taskbar: bool,    // bottom edge: sit inside the taskbar instead of above it
+    pub taskbar_al: i32,  // taskbar alignment to restore when leaving taskbar mode, -1 = untouched
+    pub art_tint: bool,   // tint the waveform and controls with the album art's color (off: white)
 }
 
 impl Default for Config {
@@ -144,6 +148,9 @@ impl Default for Config {
             games: true,
             games_online: true,
             game_level: 1,
+            taskbar: false,
+            taskbar_al: -1,
+            art_tint: true,
         }
     }
 }
@@ -229,6 +236,9 @@ impl Config {
                 "games" => c.games = b,
                 "games_online" => c.games_online = b,
                 "game_level" => c.game_level = i(1).clamp(0, 2),
+                "taskbar" => c.taskbar = b,
+                "taskbar_al" => c.taskbar_al = i(-1).clamp(-1, 1),
+                "art_tint" => c.art_tint = b,
                 _ => {}
             }
         }
@@ -302,7 +312,7 @@ impl Config {
         );
         let text = text
             + &format!(
-                "clock={}\nkeep_open={}\nsoft_shadow={}\nmedia_rest={}\nlyric_align={}\npet_touch={}\ngames={}\ngames_online={}\ngame_level={}\n",
+                "clock={}\nkeep_open={}\nsoft_shadow={}\nmedia_rest={}\nlyric_align={}\npet_touch={}\ngames={}\ngames_online={}\ngame_level={}\ntaskbar={}\ntaskbar_al={}\nart_tint={}\n",
                 self.clock,
                 b(self.keep_open),
                 b(self.soft_shadow),
@@ -312,6 +322,9 @@ impl Config {
                 b(self.games),
                 b(self.games_online),
                 self.game_level,
+                b(self.taskbar),
+                self.taskbar_al,
+                b(self.art_tint),
             );
         let path = Self::path();
         let tmp = path.with_extension("ini.tmp");

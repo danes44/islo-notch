@@ -41,6 +41,8 @@ const ISLAND_R: f32 = 30.0; // radius-island: expanded corners
 const PAD: f32 = 16.0;
 const HEADER: f32 = 34.0; // switcher row + gap
 const SHOULDER: f32 = 10.0;
+/// Taskbar mode: a live pill is the notch (about 160) plus a wing each side.
+const TB_WINGS_W: f32 = 300.0;
 const TAB_W: f32 = 36.0;
 const SLIVER_W: f32 = 8.0;
 const GLYPH: f32 = 36.0; // one glyph slot in the side tab
@@ -187,6 +189,9 @@ struct App {
     flash_wide: bool,
     hidden_user: bool,
     sys_anim: bool,
+    /// Taskbar thickness in logical px while in taskbar mode (0 otherwise):
+    /// the quiet island is exactly as tall, like a notch in the menu bar.
+    taskbar_h: f32,
 
     media: Option<MediaState>,
     art_id: u64,
@@ -455,7 +460,8 @@ impl App {
         if self.cfg.shelf && !self.shelf.is_empty() {
             return C_SHELF;
         }
-        if self.cfg.pill_glance {
+        // (in the taskbar the clock, date and battery are already beside it)
+        if self.cfg.pill_glance && !self.cfg.taskbar {
             return C_GLANCE; // date + battery, with the featured feature (Mochi naps here too)
         }
         if self.cfg.pet {
@@ -1660,7 +1666,7 @@ impl App {
         let mode = self.mode(v);
         let (mut w, mut h, r) = match mode {
             2 => (EXPANDED_W, self.panel_height(v), ISLAND_R),
-            1 => (HUD_W, COMPACT_H, NOTCH_R),
+            1 => (HUD_W, self.compact_h(), self.compact_r()),
             _ if self.tab(v) => {
                 let w = if self.cfg.side_style == 1 { SLIVER_W } else { TAB_W };
                 (w, self.tab_height(), if self.cfg.side_style == 1 { 4.0 } else { NOTCH_R })
@@ -1690,7 +1696,10 @@ impl App {
                     }
                     _ => base,
                 };
-                (w, COMPACT_H, NOTCH_R)
+                // taskbar mode: live things sit in wings either side of an
+                // empty notch, like the notch apps on a MacBook
+                let w = if self.cfg.taskbar && !matches!(kind, C_IDLE | C_PET | C_GLANCE) { w.max(TB_WINGS_W) } else { w };
+                (w, self.compact_h(), self.compact_r())
             }
         };
         if mode == 0 && !self.tab(v) {
@@ -1709,6 +1718,22 @@ impl App {
             _ => v.tab_center,
         };
         (w, h, r, anchor)
+    }
+
+    /// The music color: the album art's, or plain white when that's turned off.
+    fn shown_accent(&self) -> slint::Color {
+        if self.cfg.art_tint { self.accent } else { slint::Color::from_rgb_u8(0xff, 0xff, 0xff) }
+    }
+
+    /// Height of the compact pill: the taskbar's in taskbar mode.
+    fn compact_h(&self) -> f32 {
+        if self.cfg.taskbar && self.taskbar_h > 0.0 { self.taskbar_h } else { COMPACT_H }
+    }
+
+    /// Corner radius of the compact pill: in the taskbar a softer, rounder
+    /// bottom (half the height, up to 18).
+    fn compact_r(&self) -> f32 {
+        if self.cfg.taskbar { (self.compact_h() / 2.0).min(18.0).max(NOTCH_R) } else { NOTCH_R }
     }
 
     fn tab_top(&self, v: &View) -> f32 {
@@ -1745,6 +1770,8 @@ impl App {
         let header_clock = self.header_clock(&self.views[i]);
         let panel_index = panels.iter().position(|p| *p == self.views[i].panel).unwrap_or(0) as i32;
         let (keep_open, soft, align, touch) = (self.cfg.keep_open, self.cfg.soft_shadow, self.cfg.lyric_align, self.cfg.pet_touch && self.cfg.pet);
+        let (in_taskbar, compact_h) = (self.cfg.taskbar && !self.views[i].dragging, self.compact_h());
+        let lyric_line = kind == C_MEDIA && self.synced_on();
         let v = &mut self.views[i];
         let growing = w > v.w.target + 0.5 || h > v.h.target + 0.5;
         for s in [&mut v.w, &mut v.h, &mut v.r, &mut v.a] {
@@ -1788,6 +1815,9 @@ impl App {
         isl.set_soft_shadow(soft);
         isl.set_lyric_align(align);
         isl.set_pet_touch(touch);
+        isl.set_in_taskbar(in_taskbar);
+        isl.set_compact_h(compact_h);
+        isl.set_lyric_line(lyric_line);
     }
 
     /// Called every loop iteration. Returns true while springs are moving.
@@ -1906,7 +1936,7 @@ impl App {
         isl.set_header_clock(self.header_clock(&self.views[i]).into());
         isl.set_art(self.art.clone());
         isl.set_has_art(self.media.as_ref().is_some_and(|m| m.info.art.is_some()));
-        isl.set_accent(self.accent);
+        isl.set_accent(self.shown_accent());
         if let Some(m) = &self.media {
             isl.set_track_title(m.info.title.clone().into());
             isl.set_subtitle(subtitle(&m.info).into());
@@ -1931,6 +1961,45 @@ impl App {
         isl.set_lyric_state(if self.cfg.lyrics && self.media_visible() { self.lyric_state } else { L_HIDDEN });
         isl.set_mic_app(self.privacy.mic.clone().unwrap_or_default().into());
         isl.set_camera_app(self.privacy.camera.clone().unwrap_or_default().into());
+    }
+
+    /// Taskbar mode moves the taskbar apps to the left so the island has the
+    /// middle; leaving it puts them back where they were.
+    /// It follows the taskbar to the top or bottom of the screen.
+    fn sync_taskbar(&mut self) {
+        let before = (self.cfg.taskbar, self.cfg.taskbar_al, self.cfg.edge);
+        if self.cfg.taskbar {
+            match system::taskbar_edge() {
+                Some(e) => self.cfg.edge = e,
+                None => self.cfg.taskbar = false,
+            }
+        }
+        if self.cfg.taskbar {
+            let now = system::taskbar_alignment();
+            if self.cfg.taskbar_al < 0 {
+                self.cfg.taskbar_al = now.min(1) as i32;
+            }
+            if now != 0 {
+                system::set_taskbar_alignment(0);
+            }
+        } else if self.cfg.taskbar_al >= 0 {
+            system::set_taskbar_alignment(self.cfg.taskbar_al as u32);
+            self.cfg.taskbar_al = -1;
+        }
+        self.taskbar_h = if self.cfg.taskbar {
+            system::taskbar_thickness() as f32 / system::monitor_scale(system::primary_monitor())
+        } else {
+            0.0
+        };
+        if before != (self.cfg.taskbar, self.cfg.taskbar_al, self.cfg.edge) {
+            self.cfg.save();
+        }
+    }
+
+    fn raise_islands(&self) {
+        for v in self.views.iter().filter(|v| v.shown) {
+            system::raise_topmost(v.win.hwnd());
+        }
     }
 
     fn place_all(&mut self) {
@@ -1963,10 +2032,13 @@ impl App {
         } else {
             let span = (rc.right - rc.left - pw).max(0);
             let x = rc.left + (span as f32 * edge_pos) as i32;
-            let y = if edge == Edge::Bottom {
-                system::monitor_work_rect(m).bottom - ph // sits above the taskbar
-            } else {
-                rc.top
+            // In taskbar mode it sits inside the taskbar, flush with the screen
+            // edge; otherwise next to the taskbar, never under it.
+            let y = match (edge, self.cfg.taskbar) {
+                (Edge::Bottom, true) => rc.bottom - ph,
+                (Edge::Bottom, false) => system::monitor_work_rect(m).bottom - ph,
+                (_, true) => rc.top,
+                _ => system::monitor_work_rect(m).top,
             };
             v.win.place(x, y, pw as u32, ph as u32);
         }
@@ -2130,6 +2202,10 @@ impl App {
         };
         self.cfg.edge = edge;
         self.cfg.edge_pos = pos.clamp(0.0, 1.0);
+        if self.cfg.taskbar && system::taskbar_edge() != Some(edge) {
+            self.cfg.taskbar = false; // dropped away from the taskbar: leave it
+        }
+        self.sync_taskbar();
         if self.cfg.show_on == 0 {
             self.cfg.monitor = system::monitor_index(m);
             self.views[i].monitor = m;
@@ -3034,7 +3110,7 @@ impl App {
                             self.accent = slint::Color::from_rgb_u8(0xfc, 0x90, 0xbc); // island-rose
                         }
                     }
-                    let (art, accent, has) = (self.art.clone(), self.accent, info.art.is_some());
+                    let (art, accent, has) = (self.art.clone(), self.shown_accent(), info.art.is_some());
                     self.each(|isl| {
                         isl.set_art(art.clone());
                         isl.set_has_art(has);
@@ -3576,6 +3652,7 @@ impl App {
         if let Some(s) = &self.settings {
             s.set_keep_open(self.cfg.keep_open);
             s.set_edge(self.cfg.edge.index());
+            s.set_taskbar(self.cfg.taskbar);
         }
     }
 
@@ -3675,6 +3752,10 @@ impl App {
         }
         if c.update_check != old.update_check {
             self.schedule_update_checks();
+        }
+        if c.art_tint != old.art_tint {
+            let accent = self.shown_accent();
+            self.each(|isl| isl.set_accent(accent));
         }
         let looks = (c.pet_skin, c.pet_body, c.pet_eyes, c.pet_size) != (old.pet_skin, old.pet_body, old.pet_eyes, old.pet_size);
         if looks {
@@ -3951,6 +4032,7 @@ impl App {
 
     /// Apply the whole config to the live islands.
     fn apply_config(&mut self) {
+        self.sync_taskbar();
         shelf::set_accepting(self.cfg.shelf);
         self.update_notify();
         self.update_ble();
@@ -4007,6 +4089,16 @@ impl App {
             }
             system::WM_APP_FOREGROUND => {
                 self.check_fullscreen();
+                if self.cfg.taskbar {
+                    // the taskbar comes forward when it's clicked; stay on top of it.
+                    // Show desktop (Win + D) raises it once more a moment later.
+                    self.raise_islands();
+                    for ms in [150, 600] {
+                        slint::Timer::single_shot(Duration::from_millis(ms), || {
+                            with_app(|a| a.raise_islands());
+                        });
+                    }
+                }
                 if self.cfg.show_on == 2 {
                     // follow the display you're working on
                     let m = system::monitor_at_cursor();
@@ -4025,6 +4117,14 @@ impl App {
                 None
             }
             WM_SETTINGCHANGE => {
+                // the taskbar may have moved to another edge
+                let (edge, th) = (self.cfg.edge, self.taskbar_h);
+                self.sync_taskbar();
+                if self.cfg.edge != edge || self.taskbar_h != th {
+                    self.push_settings();
+                    self.retarget();
+                }
+                self.place_all();
                 system::tray_refresh(platform::host_hwnd());
                 self.refresh_date(); // 12/24-hour or region format may have changed
                 let anim = system::system_animations_enabled();
@@ -4066,6 +4166,12 @@ fn update_memory_text(s: &SettingsWindow) {
 
 fn quit() {
     system::set_native_osd_hidden(false);
+    // taskbar mode: give the middle of the taskbar back while Islo isn't running
+    // (it moves the apps left again on the next start)
+    let c = Config::load();
+    if c.taskbar && c.taskbar_al >= 0 {
+        system::set_taskbar_alignment(c.taskbar_al as u32);
+    }
     let host = platform::host_hwnd();
     system::tray_remove(host);
     system::unregister_fullscreen_watch(host);
@@ -4089,6 +4195,7 @@ fn fit_clock(clock: i32, time: &str, date: &str, room: f32) -> String {
 fn fill_settings(s: &SettingsWindow, c: &Config) {
     s.set_width_px(c.width);
     s.set_edge(c.edge.index());
+    s.set_taskbar(c.taskbar);
     s.set_side_style(c.side_style);
     s.set_hover_expand(c.hover_expand);
     s.set_hover_delay(c.hover_delay as f32);
@@ -4107,6 +4214,7 @@ fn fill_settings(s: &SettingsWindow, c: &Config) {
     s.set_games(c.games);
     s.set_games_online(c.games_online);
     s.set_mod_media(c.media);
+    s.set_art_tint(c.art_tint);
     s.set_mod_lyrics(c.lyrics);
     s.set_lyric_lines(c.lyric_lines as f32);
     s.set_mod_hud(c.hud);
@@ -4155,9 +4263,21 @@ fn push_pet_colors(s: &SettingsWindow, body: u32, eyes: u32) {
 fn read_settings(s: &SettingsWindow, c: &mut Config) {
     c.width = s.get_width_px().clamp(160.0, 300.0);
     let new_edge = Edge::from_index(s.get_edge());
-    if new_edge != c.edge {
+    let edge_moved = new_edge != c.edge;
+    if edge_moved {
         c.edge = new_edge;
         c.edge_pos = 0.5;
+    }
+    // taskbar mode docks to the taskbar's edge; picking another edge leaves it
+    let tb = system::taskbar_edge();
+    if s.get_taskbar() && !c.taskbar {
+        if let Some(e) = tb {
+            c.edge = e;
+        }
+        c.edge_pos = 0.5;
+        c.taskbar = true;
+    } else if !s.get_taskbar() || (edge_moved && tb != Some(c.edge)) {
+        c.taskbar = false;
     }
     c.side_style = s.get_side_style().clamp(0, 2);
     c.hover_expand = s.get_hover_expand();
@@ -4177,6 +4297,7 @@ fn read_settings(s: &SettingsWindow, c: &mut Config) {
     c.games = s.get_games();
     c.games_online = s.get_games_online();
     c.media = s.get_mod_media();
+    c.art_tint = s.get_art_tint();
     c.lyrics = s.get_mod_lyrics();
     c.lyric_lines = (s.get_lyric_lines().round() as i32).clamp(1, 10);
     c.hud = s.get_mod_hud();
@@ -4493,6 +4614,7 @@ pub fn run() -> Result<(), slint::PlatformError> {
         flash_wide: false,
         hidden_user: false,
         sys_anim: system::system_animations_enabled(),
+        taskbar_h: 0.0,
         media: None,
         art_id: 0,
         art: slint::Image::default(),
