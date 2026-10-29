@@ -1125,13 +1125,15 @@ export component Island inherits Window {
                     }
                     HorizontalLayout {
                         spacing: 8px;
-                        if root.note-count > 0 : NoteStack {
+                        // in the taskbar the right wing is just the waveform: the
+                        // count and the lyrics mark are in the open island
+                        if root.note-count > 0 && !root.in-taskbar : NoteStack {
                             y: 8px;
                             icons: root.note-icons;
                             count: root.note-count;
                         }
                         // has this song got lyrics?
-                        if root.lyric-state != 0 : Rectangle {
+                        if root.lyric-state != 0 && !root.in-taskbar : Rectangle {
                             width: 14px;
                             LyricGlyph { y: 11px; state: root.lyric-state; tint: root.accent; }
                         }
