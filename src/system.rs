@@ -249,6 +249,21 @@ pub fn set_taskbar_alignment(al: u32) {
     }
 }
 
+/// The edge the (main) taskbar is on, when it's a top or bottom one; taskbar
+/// mode follows it.
+pub fn taskbar_edge() -> Option<crate::config::Edge> {
+    use crate::config::Edge;
+    let mut abd = APPBARDATA { cbSize: std::mem::size_of::<APPBARDATA>() as u32, ..Default::default() };
+    if unsafe { SHAppBarMessage(ABM_GETTASKBARPOS, &mut abd) } == 0 {
+        return None;
+    }
+    match abd.uEdge {
+        ABE_TOP => Some(Edge::Top),
+        ABE_BOTTOM => Some(Edge::Bottom),
+        _ => None, // left/right taskbars (Windows 10, patched shells): not supported
+    }
+}
+
 /// Put an island back above the taskbar (clicking the taskbar raises it over
 /// every other topmost window).
 pub fn raise_topmost(hwnd: HWND) {

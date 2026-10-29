@@ -1935,11 +1935,15 @@ impl App {
 
     /// Taskbar mode moves the taskbar apps to the left so the island has the
     /// middle; leaving it puts them back where they were.
+    /// It follows the taskbar to the top or bottom of the screen.
     fn sync_taskbar(&mut self) {
-        if self.cfg.edge != Edge::Bottom {
-            self.cfg.taskbar = false;
+        let before = (self.cfg.taskbar, self.cfg.taskbar_al, self.cfg.edge);
+        if self.cfg.taskbar {
+            match system::taskbar_edge() {
+                Some(e) => self.cfg.edge = e,
+                None => self.cfg.taskbar = false,
+            }
         }
-        let before = (self.cfg.taskbar, self.cfg.taskbar_al);
         if self.cfg.taskbar {
             let now = system::taskbar_alignment();
             if self.cfg.taskbar_al < 0 {
@@ -1952,7 +1956,7 @@ impl App {
             system::set_taskbar_alignment(self.cfg.taskbar_al as u32);
             self.cfg.taskbar_al = -1;
         }
-        if before != (self.cfg.taskbar, self.cfg.taskbar_al) {
+        if before != (self.cfg.taskbar, self.cfg.taskbar_al, self.cfg.edge) {
             self.cfg.save();
         }
     }
@@ -1987,12 +1991,13 @@ impl App {
         } else {
             let span = (rc.right - rc.left - pw).max(0);
             let x = rc.left + (span as f32 * edge_pos) as i32;
-            let y = if edge == Edge::Bottom && self.cfg.taskbar {
-                rc.bottom - ph // sits inside the taskbar, flush with the screen edge
-            } else if edge == Edge::Bottom {
-                system::monitor_work_rect(m).bottom - ph // sits above the taskbar
-            } else {
-                rc.top
+            // In taskbar mode it sits inside the taskbar, flush with the screen
+            // edge; otherwise next to the taskbar, never under it.
+            let y = match (edge, self.cfg.taskbar) {
+                (Edge::Bottom, true) => rc.bottom - ph,
+                (Edge::Bottom, false) => system::monitor_work_rect(m).bottom - ph,
+                (_, true) => rc.top,
+                _ => system::monitor_work_rect(m).top,
             };
             v.win.place(x, y, pw as u32, ph as u32);
         }
@@ -2156,7 +2161,10 @@ impl App {
         };
         self.cfg.edge = edge;
         self.cfg.edge_pos = pos.clamp(0.0, 1.0);
-        self.sync_taskbar(); // dropped on another edge: leave the taskbar
+        if self.cfg.taskbar && system::taskbar_edge() != Some(edge) {
+            self.cfg.taskbar = false; // dropped away from the taskbar: leave it
+        }
+        self.sync_taskbar();
         if self.cfg.show_on == 0 {
             self.cfg.monitor = system::monitor_index(m);
             self.views[i].monitor = m;
@@ -4060,6 +4068,14 @@ impl App {
                 None
             }
             WM_SETTINGCHANGE => {
+                // the taskbar may have moved to another edge
+                let edge = self.cfg.edge;
+                self.sync_taskbar();
+                if self.cfg.edge != edge {
+                    self.push_settings();
+                    self.retarget();
+                }
+                self.place_all();
                 system::tray_refresh(platform::host_hwnd());
                 self.refresh_date(); // 12/24-hour or region format may have changed
                 let anim = system::system_animations_enabled();
@@ -4202,12 +4218,15 @@ fn read_settings(s: &SettingsWindow, c: &mut Config) {
         c.edge = new_edge;
         c.edge_pos = 0.5;
     }
-    // taskbar mode docks to the bottom edge; picking another edge leaves it
+    // taskbar mode docks to the taskbar's edge; picking another edge leaves it
+    let tb = system::taskbar_edge();
     if s.get_taskbar() && !c.taskbar {
-        c.edge = Edge::Bottom;
+        if let Some(e) = tb {
+            c.edge = e;
+        }
         c.edge_pos = 0.5;
         c.taskbar = true;
-    } else if !s.get_taskbar() || (edge_moved && c.edge != Edge::Bottom) {
+    } else if !s.get_taskbar() || (edge_moved && tb != Some(c.edge)) {
         c.taskbar = false;
     }
     c.side_style = s.get_side_style().clamp(0, 2);
