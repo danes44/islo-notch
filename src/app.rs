@@ -1933,6 +1933,30 @@ impl App {
         isl.set_camera_app(self.privacy.camera.clone().unwrap_or_default().into());
     }
 
+    /// Taskbar mode moves the taskbar apps to the left so the island has the
+    /// middle; leaving it puts them back where they were.
+    fn sync_taskbar(&mut self) {
+        if self.cfg.edge != Edge::Bottom {
+            self.cfg.taskbar = false;
+        }
+        let before = (self.cfg.taskbar, self.cfg.taskbar_al);
+        if self.cfg.taskbar {
+            let now = system::taskbar_alignment();
+            if self.cfg.taskbar_al < 0 {
+                self.cfg.taskbar_al = now.min(1) as i32;
+            }
+            if now != 0 {
+                system::set_taskbar_alignment(0);
+            }
+        } else if self.cfg.taskbar_al >= 0 {
+            system::set_taskbar_alignment(self.cfg.taskbar_al as u32);
+            self.cfg.taskbar_al = -1;
+        }
+        if before != (self.cfg.taskbar, self.cfg.taskbar_al) {
+            self.cfg.save();
+        }
+    }
+
     fn place_all(&mut self) {
         for i in 0..self.views.len() {
             self.place(i);
@@ -1963,7 +1987,9 @@ impl App {
         } else {
             let span = (rc.right - rc.left - pw).max(0);
             let x = rc.left + (span as f32 * edge_pos) as i32;
-            let y = if edge == Edge::Bottom {
+            let y = if edge == Edge::Bottom && self.cfg.taskbar {
+                rc.bottom - ph // sits inside the taskbar, flush with the screen edge
+            } else if edge == Edge::Bottom {
                 system::monitor_work_rect(m).bottom - ph // sits above the taskbar
             } else {
                 rc.top
@@ -2130,6 +2156,7 @@ impl App {
         };
         self.cfg.edge = edge;
         self.cfg.edge_pos = pos.clamp(0.0, 1.0);
+        self.sync_taskbar(); // dropped on another edge: leave the taskbar
         if self.cfg.show_on == 0 {
             self.cfg.monitor = system::monitor_index(m);
             self.views[i].monitor = m;
@@ -3576,6 +3603,7 @@ impl App {
         if let Some(s) = &self.settings {
             s.set_keep_open(self.cfg.keep_open);
             s.set_edge(self.cfg.edge.index());
+            s.set_taskbar(self.cfg.taskbar);
         }
     }
 
@@ -3951,6 +3979,7 @@ impl App {
 
     /// Apply the whole config to the live islands.
     fn apply_config(&mut self) {
+        self.sync_taskbar();
         shelf::set_accepting(self.cfg.shelf);
         self.update_notify();
         self.update_ble();
@@ -4007,6 +4036,12 @@ impl App {
             }
             system::WM_APP_FOREGROUND => {
                 self.check_fullscreen();
+                if self.cfg.taskbar {
+                    // the taskbar comes forward when it's clicked; stay on top of it
+                    for v in self.views.iter().filter(|v| v.shown) {
+                        system::raise_topmost(v.win.hwnd());
+                    }
+                }
                 if self.cfg.show_on == 2 {
                     // follow the display you're working on
                     let m = system::monitor_at_cursor();
@@ -4066,6 +4101,12 @@ fn update_memory_text(s: &SettingsWindow) {
 
 fn quit() {
     system::set_native_osd_hidden(false);
+    // taskbar mode: give the middle of the taskbar back while Islo isn't running
+    // (it moves the apps left again on the next start)
+    let c = Config::load();
+    if c.taskbar && c.taskbar_al >= 0 {
+        system::set_taskbar_alignment(c.taskbar_al as u32);
+    }
     let host = platform::host_hwnd();
     system::tray_remove(host);
     system::unregister_fullscreen_watch(host);
@@ -4089,6 +4130,7 @@ fn fit_clock(clock: i32, time: &str, date: &str, room: f32) -> String {
 fn fill_settings(s: &SettingsWindow, c: &Config) {
     s.set_width_px(c.width);
     s.set_edge(c.edge.index());
+    s.set_taskbar(c.taskbar);
     s.set_side_style(c.side_style);
     s.set_hover_expand(c.hover_expand);
     s.set_hover_delay(c.hover_delay as f32);
@@ -4155,9 +4197,18 @@ fn push_pet_colors(s: &SettingsWindow, body: u32, eyes: u32) {
 fn read_settings(s: &SettingsWindow, c: &mut Config) {
     c.width = s.get_width_px().clamp(160.0, 300.0);
     let new_edge = Edge::from_index(s.get_edge());
-    if new_edge != c.edge {
+    let edge_moved = new_edge != c.edge;
+    if edge_moved {
         c.edge = new_edge;
         c.edge_pos = 0.5;
+    }
+    // taskbar mode docks to the bottom edge; picking another edge leaves it
+    if s.get_taskbar() && !c.taskbar {
+        c.edge = Edge::Bottom;
+        c.edge_pos = 0.5;
+        c.taskbar = true;
+    } else if !s.get_taskbar() || (edge_moved && c.edge != Edge::Bottom) {
+        c.taskbar = false;
     }
     c.side_style = s.get_side_style().clamp(0, 2);
     c.hover_expand = s.get_hover_expand();

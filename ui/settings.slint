@@ -466,6 +466,7 @@ export component SettingsWindow inherits Window {
     // ---- appearance ----
     in-out property <float> width-px: 200;
     in-out property <int> edge: 0;
+    in-out property <bool> taskbar: false;
     in-out property <int> side-style: 0;
     in-out property <bool> hover-expand: true;
     in-out property <float> hover-delay: 300;
@@ -671,6 +672,14 @@ export component SettingsWindow inherits Window {
                                 }
                                 Button { y: 12px; text: "Reset position"; clicked => { root.reset-position(); } }
                             }
+                        }
+                        Row {
+                            name: "Inside the taskbar";
+                            min-h: 78px;
+                            new-badge: true;
+                            desc: "The island sits in the middle of the taskbar and your taskbar apps move to the left. Turn it off, drag the island to another edge or quit Islo, and they go back.";
+                            saved: root.saved-key == "taskbar";
+                            Toggle { y: 18px; checked <=> root.taskbar; toggled => { root.changed("taskbar"); } }
                         }
                         Row {
                             name: "On the left or right edge";
