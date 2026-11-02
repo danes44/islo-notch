@@ -219,6 +219,94 @@ pub fn reg_dword(root: HKEY, path: PCWSTR, name: PCWSTR) -> Option<u32> {
     (r == ERROR_SUCCESS).then_some(data)
 }
 
+// ---------------- taskbar ----------------
+
+const TASKBAR_KEY: PCWSTR = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced");
+
+/// Windows 11 taskbar alignment: 0 left, 1 center (the default when unset).
+pub fn taskbar_alignment() -> u32 {
+    reg_dword(HKEY_CURRENT_USER, TASKBAR_KEY, w!("TaskbarAl")).unwrap_or(1)
+}
+
+/// Move the taskbar apps left (0) or back to the center (1). Explorer picks it
+/// up from the "TraySettings" broadcast, no restart needed. The broadcast waits
+/// on every window, so it runs off the UI thread.
+pub fn set_taskbar_alignment(al: u32) {
+    if write_taskbar_alignment(al) {
+        std::thread::spawn(broadcast_tray_settings);
+    }
+}
+
+/// The same, finished before it returns: for when Islo is about to exit.
+pub fn set_taskbar_alignment_now(al: u32) {
+    if write_taskbar_alignment(al) {
+        broadcast_tray_settings();
+    }
+}
+
+/// False if the value couldn't be written: no broadcast then, because Islo
+/// would hear it, find the old value and try again forever.
+fn write_taskbar_alignment(al: u32) -> bool {
+    unsafe {
+        let mut key = HKEY::default();
+        if RegOpenKeyExW(HKEY_CURRENT_USER, TASKBAR_KEY, None, KEY_SET_VALUE, &mut key) != ERROR_SUCCESS {
+            return false;
+        }
+        let r = RegSetValueExW(key, w!("TaskbarAl"), None, REG_DWORD, Some(&al.to_le_bytes()));
+        let _ = RegCloseKey(key);
+        r == ERROR_SUCCESS
+    }
+}
+
+fn broadcast_tray_settings() {
+    unsafe {
+        let _ = SendMessageTimeoutW(
+            HWND_BROADCAST,
+            WM_SETTINGCHANGE,
+            WPARAM(0),
+            LPARAM(w!("TraySettings").as_ptr() as isize),
+            SMTO_ABORTIFHUNG,
+            200,
+            None,
+        );
+    }
+}
+
+/// The edge the (main) taskbar is on; taskbar mode follows it. None if Windows
+/// can't say right now, like while Explorer restarts.
+pub fn taskbar_edge() -> Option<crate::config::Edge> {
+    use crate::config::Edge;
+    let mut abd = APPBARDATA { cbSize: std::mem::size_of::<APPBARDATA>() as u32, ..Default::default() };
+    if unsafe { SHAppBarMessage(ABM_GETTASKBARPOS, &mut abd) } == 0 {
+        return None;
+    }
+    match abd.uEdge {
+        ABE_TOP => Some(Edge::Top),
+        ABE_BOTTOM => Some(Edge::Bottom),
+        ABE_LEFT => Some(Edge::Left),
+        ABE_RIGHT => Some(Edge::Right),
+        _ => None,
+    }
+}
+
+/// How thick the (main) taskbar is, in physical px (0 if unknown).
+pub fn taskbar_thickness() -> i32 {
+    let mut abd = APPBARDATA { cbSize: std::mem::size_of::<APPBARDATA>() as u32, ..Default::default() };
+    if unsafe { SHAppBarMessage(ABM_GETTASKBARPOS, &mut abd) } == 0 {
+        return 0;
+    }
+    let r = abd.rc;
+    if abd.uEdge == ABE_TOP || abd.uEdge == ABE_BOTTOM { r.bottom - r.top } else { r.right - r.left }
+}
+
+/// Put an island back above the taskbar (clicking the taskbar raises it over
+/// every other topmost window).
+pub fn raise_topmost(hwnd: HWND) {
+    unsafe {
+        let _ = SetWindowPos(hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+}
+
 pub fn apps_dark_mode() -> bool {
     reg_dword(HKEY_CURRENT_USER, w!("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize"), w!("AppsUseLightTheme")) == Some(0)
 }

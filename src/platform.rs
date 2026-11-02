@@ -442,6 +442,18 @@ impl WinWindow {
             }
             WM_MOUSEACTIVATE if self.kind == Kind::Island => Some(LRESULT(MA_NOACTIVATE as isize)),
             WM_NCHITTEST if self.kind == Kind::Island => Some(LRESULT(HTCLIENT as isize)),
+            // Windows minimizes the island when the taskbar is clicked; islands
+            // never minimize, so put it straight back (and back on top).
+            WM_SYSCOMMAND if self.kind == Kind::Island && (wp.0 & 0xfff0) as u32 == SC_MINIMIZE => Some(LRESULT(0)),
+            WM_SIZE if self.kind == Kind::Island && wp.0 as u32 == SIZE_MINIMIZED => {
+                unsafe {
+                    let _ = ShowWindowAsync(hwnd, SW_SHOWNOACTIVATE);
+                    let _ = SetWindowPos(hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+                }
+                self.presented.set(None); // present again at its real place
+                self.needs_redraw.set(true);
+                Some(LRESULT(0))
+            }
             WM_SETCURSOR => {
                 if (lp.0 & 0xffff) as u32 == HTCLIENT {
                     unsafe {
