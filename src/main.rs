@@ -18,6 +18,8 @@ mod config;
 #[cfg(windows)]
 mod game;
 #[cfg(windows)]
+mod glass;
+#[cfg(windows)]
 mod http;
 #[cfg(windows)]
 mod live;

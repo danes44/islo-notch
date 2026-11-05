@@ -8,20 +8,35 @@
 import { Icon, LineIcon, Icons, Mochi } from "icons.slint";
 
 // ---- design tokens (island-* are fixed: the island is always dark) ----
+// The island's colors. Rust sets `look` from Settings > Theme:
+// 0 dark (the classic black island), 1 light, 2 Liquid Glass. Glass picks dark
+// ink over a bright backdrop (`glass-dark-ink`, measured in Rust), so its
+// tokens follow `light` from there on.
 export global T {
-    out property <color> bg: #000000;
-    out property <color> tile: #1c1c1c;
-    out property <color> tile-hover: #2a2a2a;
-    out property <color> hairline: #2a2a2a;
-    out property <color> ink: #f5f5f5;
-    out property <color> muted: #a3a3a3;
-    out property <color> rose: #fc90bc;
-    out property <color> orange: #f99f55;
-    out property <color> green: #6fd087;
-    out property <color> blue: #71bfff;
-    out property <color> indigo: #a9b0fd;
-    out property <color> red: #f4514f;
-    out property <color> yellow: #d3b63b; // island-pet (brand: Mochi and the logo's eyes)
+    in property <int> look: 0;
+    in property <bool> glass-dark-ink: false;
+    // Liquid Glass while no live image is under it (Still glass, battery saver)
+    in property <color> glass-fill: #18181e9e;
+    out property <bool> glass: look == 2;
+    out property <bool> light: look == 1 || (look == 2 && glass-dark-ink);
+    out property <color> bg: look == 1 ? #f7f7f9 : look == 2 ? transparent : #000000;
+    out property <color> tile: light ? #00000012 : glass ? #ffffff26 : #1c1c1c;
+    out property <color> tile-hover: light ? #0000001f : glass ? #ffffff3d : #2a2a2a;
+    out property <color> tile-press: light ? #0000002e : glass ? #ffffff52 : #3a3a3a;
+    out property <color> hairline: light ? #00000024 : glass ? #ffffff38 : #2a2a2a;
+    out property <color> ink: light ? #141414 : glass ? #ffffff : #f5f5f5;
+    out property <color> muted: light ? #5a5a5e : glass ? #ffffffc7 : #a3a3a3;
+    // feature hues: the design system's light-theme set on light grounds
+    out property <color> rose: light ? #b54879 : #fc90bc;
+    out property <color> orange: light ? #ab5e0c : #f99f55;
+    out property <color> green: light ? #0e8c41 : #6fd087;
+    out property <color> blue: light ? #037ac0 : #71bfff;
+    out property <color> indigo: light ? #6566c9 : #a9b0fd;
+    out property <color> red: light ? #c4242a : #f4514f;
+    out property <color> yellow: light ? #796100 : #d3b63b; // island-pet (brand: Mochi and the logo's eyes)
+    out property <color> on-feature: light ? #ffffff : #000000; // text on a feature-colored badge
+    out property <color> win-cell: light ? #f3e7b8 : #2f2a14;
+    out property <color> sep: glass ? #1c1c22 : bg; // ring that separates overlapping icons
     out property <length> shoulder: 10px;
     out property <length> tile-r: 14px;
 }
@@ -240,7 +255,7 @@ component NoteStack inherits Rectangle {
         width: 20px;
         height: 20px;
         border-radius: 6px;
-        background: T.bg; // a black ring separates overlapping icons
+        background: T.sep; // a ring separates overlapping icons
         Rectangle {
             x: 1px;
             y: 1px;
@@ -266,7 +281,7 @@ component NoteStack inherits Rectangle {
         background: T.blue;
         badge := Text {
             text: root.count > 9 ? "9+" : root.count;
-            color: #000000;
+            color: T.on-feature;
             font-size: 9px;
             font-weight: 700;
             horizontal-alignment: center;
@@ -289,7 +304,7 @@ component NavArrow inherits Rectangle {
     width: 26px;
     height: 26px;
     border-radius: 13px;
-    background: ta.pressed && root.enabled ? #3a3a3a : ta.has-hover && root.enabled ? T.tile-hover : #1c1c1ce6;
+    background: ta.pressed && root.enabled ? T.tile-press : ta.has-hover && root.enabled ? T.tile-hover : T.tile;
     animate background { duration: 90ms; }
     opacity: !root.shown ? 0 : root.enabled ? 1 : 0.35;
     animate opacity { duration: root.reduce-motion ? 0ms : 180ms; }
@@ -384,7 +399,7 @@ component IslandSeg inherits Rectangle {
         padding: 2px;
         for o[k] in root.options : Rectangle {
             border-radius: 10px;
-            background: k == root.current ? T.tile-hover : seg-ta.has-hover ? #242424 : transparent;
+            background: k == root.current ? T.tile-hover : seg-ta.has-hover ? T.tile : transparent;
             animate background { duration: 180ms; }
             min-width: t.preferred-width + 18px;
             t := Text {
@@ -480,7 +495,7 @@ component LyricGlyph inherits Rectangle {
         viewbox-height: 24;
         commands: "M4 21 L21 4";
         fill: transparent;
-        stroke: T.bg;
+        stroke: T.sep;
         stroke-width: 4px;
     }
     if root.state >= 4 : Path {
@@ -662,6 +677,8 @@ export component Island inherits Window {
     in property <image> art;
     in property <bool> has-art: false;
     in property <color> accent: T.rose;  // island-media: sampled from the artwork
+    // on a light island the (bright) art color is darkened, and plain white becomes the ink
+    property <color> art-tint: !T.light ? root.accent : root.accent == #ffffff ? T.ink : root.accent.darker(0.6);
     in property <float> progress: 0;
     in property <string> elapsed: "";
     in property <string> duration: "";
@@ -685,6 +702,13 @@ export component Island inherits Window {
     in property <bool> soft-shadow: true;
     // taskbar mode: a notch as tall as the taskbar, no shadow
     in property <bool> in-taskbar: false;
+    // ---- 1.0 looks ----
+    // Dynamic pill: the island floats this far off the screen edge (0: a notch)
+    in property <length> float-gap: 0px;
+    // Liquid Glass: the screen behind the pill, bent and tinted in Rust
+    // (src/glass.rs), exactly the pill's size. Off: still glass (a smoky fill).
+    in property <image> glass-image;
+    in property <bool> glass-live: false;
     in property <length> compact-h: 36px;
     in property <bool> lyric-line: false; // the media pill shows the current lyric line
     in property <bool> keep-open: false;   // pinned open
@@ -769,7 +793,7 @@ export component Island inherits Window {
     property <float> sh-open: clamp((root.radius - 14px) / 16px, 0, 1);
     if root.soft-shadow && root.edge != 4 && !root.in-taskbar && !(root.tab && root.side-style == 1) : Rectangle {
         for r in [14, 30] : Image {
-            property <length> back: r * 1px; // how far past the screen edge the flat side goes
+            property <length> back: root.float-gap > 0 ? 0px : r * 1px; // how far past the screen edge the flat side goes
             property <float> weight: r == 14 ? 1 - root.sh-open : root.sh-open;
             visible: self.weight > 0.02;
             source: r == 14 ? root.shadow-compact : root.shadow-open;
@@ -796,6 +820,15 @@ export component Island inherits Window {
     property <bool> on-side: root.edge == 2 || root.edge == 3;
     // Thin sliver: the visible strip is 8 px, but the hover target stays 36 px.
     // Nearly-transparent pixels (alpha 2/255) still catch the pointer.
+    // Dynamic pill: the gap between the screen edge and the pill still counts as
+    // the island, so flicking the pointer to the edge reaches it (Fitts's law)
+    if root.float-gap > 0 : Rectangle {
+        x: pill.x;
+        y: root.edge == 1 ? pill.y + pill.height : 0;
+        width: pill.width;
+        height: root.float-gap;
+        background: #00000002;
+    }
     if root.tab && root.side-style == 1 : Rectangle {
         x: root.edge == 2 ? 0 : root.width - 36px;
         y: pill.y;
@@ -803,7 +836,7 @@ export component Island inherits Window {
         height: pill.height;
         background: #00000002;
     }
-    if root.edge != 4 : Path {
+    if root.edge != 4 && root.float-gap == 0 : Path {
         viewbox-width: 1;
         viewbox-height: 1;
         width: root.s;
@@ -816,7 +849,7 @@ export component Island inherits Window {
             : root.edge == 2 ? "M0 0 L0 1 L1 1 A1 1 0 0 1 0 0 Z"
             : "M1 0 L1 1 L0 1 A1 1 0 0 0 1 0 Z";
     }
-    if root.edge != 4 : Path {
+    if root.edge != 4 && root.float-gap == 0 : Path {
         viewbox-width: 1;
         viewbox-height: 1;
         width: root.s;
@@ -895,20 +928,45 @@ export component Island inherits Window {
 
     pill := Rectangle {
         x: root.edge == 2 ? 0 : root.edge == 3 ? root.width - self.width : (root.width - self.width) / 2;
-        y: root.edge == 0 ? 0 : root.edge == 1 ? root.height - self.height : root.edge == 4 ? (root.height - self.height) / 2
+        y: root.edge == 0 ? root.float-gap : root.edge == 1 ? root.height - self.height - root.float-gap : root.edge == 4 ? (root.height - self.height) / 2
             : clamp(root.anchor - self.height / 2, root.s, root.height - self.height - root.s);
         width: root.pill-w;
         height: root.pill-h;
-        background: T.bg;
-        // flat on the edge side, rounded elsewhere
-        border-top-left-radius: root.edge == 0 || root.edge == 2 ? 0 : root.radius;
-        border-top-right-radius: root.edge == 0 || root.edge == 3 ? 0 : root.radius;
-        border-bottom-left-radius: root.edge == 1 || root.edge == 2 ? 0 : root.radius;
-        border-bottom-right-radius: root.edge == 1 || root.edge == 3 ? 0 : root.radius;
+        background: T.glass ? (root.glass-live ? transparent : T.glass-fill) : T.bg;
+        // a notch is flat on the edge side, rounded elsewhere; a floating pill is round all over
+        property <bool> flat: root.float-gap == 0;
+        border-top-left-radius: self.flat && (root.edge == 0 || root.edge == 2) ? 0 : root.radius;
+        border-top-right-radius: self.flat && (root.edge == 0 || root.edge == 3) ? 0 : root.radius;
+        border-bottom-left-radius: self.flat && (root.edge == 1 || root.edge == 2) ? 0 : root.radius;
+        border-bottom-right-radius: self.flat && (root.edge == 1 || root.edge == 3) ? 0 : root.radius;
         // floating while dragged: a plain pill with a hairline so it reads on any wallpaper
         border-width: root.edge == 4 ? 1px : 0px;
         border-color: #ffffff1f;
         clip: true;
+
+        // ---- Liquid Glass ----
+        // Live: Rust's image of the bent, frosted, tinted screen behind (with its
+        // inner glow already in it). Still: a sheen over the smoky fill, and a rim.
+        if T.glass && root.glass-live : Image {
+            width: parent.width;
+            height: parent.height;
+            source: root.glass-image;
+            image-fit: fill;
+        }
+        if T.glass && !root.glass-live : Rectangle {
+            background: @linear-gradient(180deg, #ffffff29 0%, #ffffff08 55%, #ffffff0f 100%);
+        }
+        if T.glass && !root.glass-live : Rectangle {
+            border-radius: root.radius;
+            border-width: 1px;
+            border-color: #ffffff4d;
+        }
+        // light themes: a hairline so a light island reads on a light page
+        if T.look == 1 : Rectangle {
+            border-radius: root.radius;
+            border-width: 1px;
+            border-color: #0000000f;
+        }
 
         // Hit area under everything: press squish, click, right-click, scroll for volume.
         // (Hover is tracked in Rust from the raw pointer position.)
@@ -969,7 +1027,7 @@ export component Island inherits Window {
                         Rectangle {
                             border-radius: 6px;
                             border-width: 2px;
-                            border-color: root.accent;
+                            border-color: root.art-tint;
                         }
                     }
                     if g == 1 : Icon { d: Icons.bolt; fill: T.green; width: 16px; height: 16px; }
@@ -1005,7 +1063,7 @@ export component Island inherits Window {
                         width: 4px;
                         height: 4px;
                         border-radius: 2px;
-                        background: g == 0 ? root.accent : g == 1 || g == 6 ? T.green : g == 3 ? T.red : g == 4 || g == 5 ? T.orange : g == 7 ? T.indigo : g == 8 ? T.yellow : g == 9 ? T.blue : g == 10 ? T.green : T.ink;
+                        background: g == 0 ? root.art-tint : g == 1 || g == 6 ? T.green : g == 3 ? T.red : g == 4 || g == 5 ? T.orange : g == 7 ? T.indigo : g == 8 ? T.yellow : g == 9 ? T.blue : g == 10 ? T.green : T.ink;
                     }
                 }
             }
@@ -1034,7 +1092,7 @@ export component Island inherits Window {
                         y: 2px;
                         width: 16px;
                         height: 16px;
-                        fill: root.has-media ? root.accent : T.rose;
+                        fill: root.has-media ? root.art-tint : T.rose;
                     }
                     if root.featured == 2 : Ring {
                         x: 1px;
@@ -1123,7 +1181,7 @@ export component Island inherits Window {
                             Rectangle {
                                 border-radius: parent.border-radius;
                                 border-width: root.in-taskbar ? 1px : 2px;
-                                border-color: root.in-taskbar ? #ffffff29 : root.accent;
+                                border-color: root.in-taskbar ? #ffffff29 : root.art-tint;
                             }
                         }
                         // in the taskbar: art and waveform sit in the wings, the middle stays
@@ -1147,12 +1205,12 @@ export component Island inherits Window {
                         // has this song got lyrics?
                         if root.lyric-state != 0 && !root.in-taskbar : Rectangle {
                             width: 14px;
-                            LyricGlyph { y: 11px; state: root.lyric-state; tint: root.accent; }
+                            LyricGlyph { y: 11px; state: root.lyric-state; tint: root.art-tint; }
                         }
                         Wave {
                             y: 10px;
                             levels: root.wave;
-                            tint: root.accent;
+                            tint: root.art-tint;
                             ms: root.reduce-motion ? 0ms : root.wave-ms;
                         }
                     }
@@ -1533,10 +1591,10 @@ export component Island inherits Window {
                         border-radius: 5px;
                         background: T.blue;
                         border-width: 1.5px;
-                        border-color: T.bg;
+                        border-color: T.sep;
                         Text {
                             text: root.note-count > 9 ? "+" : root.note-count;
-                            color: #000000;
+                            color: T.on-feature;
                             font-size: 7px;
                             font-weight: 700;
                             horizontal-alignment: center;
@@ -1587,10 +1645,10 @@ export component Island inherits Window {
                         border-radius: 5px;
                         background: T.ink;
                         border-width: 1.5px;
-                        border-color: T.bg;
+                        border-color: T.sep;
                         Text {
                             text: root.shelf-items.length > 9 ? "+" : root.shelf-items.length;
-                            color: #000000;
+                            color: T.on-feature;
                             font-size: 7px;
                             font-weight: 700;
                             horizontal-alignment: center;
@@ -1942,7 +2000,7 @@ export component Island inherits Window {
                                 width: send-lbl.preferred-width + 24px;
                                 height: 28px;
                                 border-radius: 14px;
-                                background: send-ta.has-hover ? #3a3a3a : T.tile-hover;
+                                background: send-ta.has-hover ? T.tile-press : T.tile-hover;
                                 send-lbl := Text {
                                     text: "Send " + root.pet-name;
                                     color: T.ink;
@@ -2000,7 +2058,7 @@ export component Island inherits Window {
                         x: parent.width - self.width;
                         y: 12px;
                         levels: root.wave;
-                        tint: root.accent;
+                        tint: root.art-tint;
                         ms: root.reduce-motion ? 0ms : root.wave-ms;
                     }
                     Flickable {
@@ -2202,7 +2260,7 @@ export component Island inherits Window {
                             width: 28px;
                             height: 28px;
                             border-radius: 14px;
-                            background: root.accent;
+                            background: root.art-tint;
                         }
                     }
                     Text {
@@ -2228,7 +2286,7 @@ export component Island inherits Window {
                         x: parent.width - self.width;
                         y: 20px;
                         levels: root.wave;
-                        tint: root.accent;
+                        tint: root.art-tint;
                         ms: root.reduce-motion ? 0ms : root.wave-ms;
                     }
 
@@ -2252,7 +2310,7 @@ export component Island inherits Window {
                             y: 5px;
                             width: parent.width - 76px;
                             value: root.progress;
-                            fill: root.accent;
+                            fill: root.art-tint;
                         }
                         Text {
                             x: parent.width - 30px;
@@ -2298,7 +2356,7 @@ export component Island inherits Window {
                         x: parent.width - self.width;
                         y: 98px;
                         state: root.lyric-state;
-                        tint: root.accent;
+                        tint: root.art-tint;
                         open => { root.select-panel(4); }
                     }
                 }
@@ -2331,7 +2389,7 @@ export component Island inherits Window {
                             width: 52px;
                             height: 52px;
                             border-radius: 12px;
-                            background: root.game-win[k] ? #2f2a14 : cell-ta.has-hover && c == 0 ? T.tile-hover : T.tile;
+                            background: root.game-win[k] ? T.win-cell : cell-ta.has-hover && c == 0 ? T.tile-hover : T.tile;
                             animate background { duration: root.instant; }
                             if c == 1 : Path {
                                 x: 13px;
@@ -2644,7 +2702,7 @@ export component Island inherits Window {
                                 width: 20px;
                                 height: 20px;
                                 border-radius: 10px;
-                                background: x-ta.has-hover ? #3a3a3a : T.tile-hover;
+                                background: x-ta.has-hover ? T.tile-press : T.tile-hover;
                                 opacity: tile-ta.has-hover || x-ta.has-hover ? 1 : 0;
                                 animate opacity { duration: root.instant; }
                                 Icon {
@@ -2696,7 +2754,7 @@ export component Island inherits Window {
                 width: 200px;
                 height: 28px;
                 border-radius: 14px;
-                background: #262626;
+                background: T.tile;
                 HorizontalLayout {
                     padding-left: 12px;
                     padding-right: 12px;

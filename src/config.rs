@@ -42,7 +42,7 @@ pub struct Config {
     pub side_style: i32, // 0 icon tab, 1 thin sliver, 2 full vertical pill
     pub hover_expand: bool,
     pub hover_delay: u32, // ms, 100..1000
-    pub theme: i32,       // settings window: 0 follow Windows, 1 light, 2 dark
+    pub theme: i32,       // island + settings window: 0 follow Windows, 1 light, 2 dark, 3 Liquid Glass
     pub reduce_motion: bool,
     pub show_on: i32, // 0 main display, 1 all displays, 2 display with the pointer
     pub monitor: i32, // 0 = primary, n = n-th display (used with show_on = 0)
@@ -96,6 +96,10 @@ pub struct Config {
     pub taskbar_back_edge: Edge, // where the island was before taskbar mode
     pub taskbar_back_pos: f32,
     pub art_tint: bool,   // tint the waveform and controls with the album art's color (off: white)
+    // look (1.0)
+    pub island_style: i32, // 0 notch (joined to the edge), 1 dynamic pill (floats just off it)
+    pub glass_tint: u32,   // Liquid Glass tint, 0xRRGGBB (white = clear)
+    pub glass_live: bool,  // Liquid Glass bends the screen behind it (off: still glass)
 }
 
 impl Default for Config {
@@ -155,6 +159,9 @@ impl Default for Config {
             taskbar_back_edge: Edge::Top,
             taskbar_back_pos: 0.5,
             art_tint: true,
+            island_style: 0,
+            glass_tint: 0xffffff,
+            glass_live: true,
         }
     }
 }
@@ -194,7 +201,7 @@ impl Config {
                 "side_style" => c.side_style = i(0).clamp(0, 2),
                 "hover_expand" => c.hover_expand = b,
                 "hover_delay" => c.hover_delay = i(300).clamp(100, 1000) as u32,
-                "theme" => c.theme = i(0).clamp(0, 2),
+                "theme" => c.theme = i(0).clamp(0, 3),
                 "reduce_motion" => c.reduce_motion = b,
                 "show_on" => c.show_on = i(0).clamp(0, 2),
                 "monitor" => c.monitor = i(0).max(0),
@@ -245,6 +252,9 @@ impl Config {
                 "taskbar_back_edge" => c.taskbar_back_edge = Edge::from_index(i(0)),
                 "taskbar_back_pos" => c.taskbar_back_pos = f(0.5).clamp(0.0, 1.0),
                 "art_tint" => c.art_tint = b,
+                "island_style" => c.island_style = i(0).clamp(0, 1),
+                "glass_tint" => c.glass_tint = hex(v, 0xffffff),
+                "glass_live" => c.glass_live = b,
                 _ => {}
             }
         }
@@ -318,7 +328,7 @@ impl Config {
         );
         let text = text
             + &format!(
-                "clock={}\nkeep_open={}\nsoft_shadow={}\nmedia_rest={}\nlyric_align={}\npet_touch={}\ngames={}\ngames_online={}\ngame_level={}\ntaskbar={}\ntaskbar_al={}\ntaskbar_back_edge={}\ntaskbar_back_pos={:.3}\nart_tint={}\n",
+                "clock={}\nkeep_open={}\nsoft_shadow={}\nmedia_rest={}\nlyric_align={}\npet_touch={}\ngames={}\ngames_online={}\ngame_level={}\ntaskbar={}\ntaskbar_al={}\ntaskbar_back_edge={}\ntaskbar_back_pos={:.3}\nart_tint={}\nisland_style={}\nglass_tint=#{:06x}\nglass_live={}\n",
                 self.clock,
                 b(self.keep_open),
                 b(self.soft_shadow),
@@ -333,6 +343,9 @@ impl Config {
                 self.taskbar_back_edge.index(),
                 self.taskbar_back_pos,
                 b(self.art_tint),
+                self.island_style,
+                self.glass_tint,
+                b(self.glass_live),
             );
         let path = Self::path();
         let tmp = path.with_extension("ini.tmp");
@@ -365,7 +378,7 @@ mod tests {
             side_style: 2,
             hover_expand: false,
             hover_delay: 650,
-            theme: 2,
+            theme: 3,
             reduce_motion: true,
             show_on: 2,
             monitor: 1,
@@ -413,6 +426,9 @@ mod tests {
             taskbar_back_edge: Edge::Left,
             taskbar_back_pos: 0.75,
             art_tint: false,
+            island_style: 1,
+            glass_tint: 0x1482ff,
+            glass_live: false,
         }
     }
 

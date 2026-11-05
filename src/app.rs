@@ -16,8 +16,8 @@ use crate::platform::{self, Kind, WinWindow};
 use crate::shelf::{self, DropEvent, Entry};
 use crate::spring::Spring;
 use crate::system::{self, Battery};
-use crate::{Island, NearbyItem, NoteItem, PetSkin, SettingsWindow, ShelfItem};
-use crate::{audio, brightness, game, live, lyrics, media, notify, package, pet, update};
+use crate::{Island, IslandTheme, NearbyItem, NoteItem, PetSkin, SettingsWindow, ShelfItem};
+use crate::{audio, brightness, game, glass, live, lyrics, media, notify, package, pet, update};
 use slint::{ComponentHandle, ModelRc, Timer, TimerMode, VecModel};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -39,6 +39,7 @@ const EXPANDED_W: f32 = 380.0;
 const HUD_W: f32 = 260.0;
 const NOTCH_R: f32 = 14.0; // radius-tile: compact corners
 const ISLAND_R: f32 = 30.0; // radius-island: expanded corners
+const FLOAT_GAP: f32 = 8.0; // dynamic pill: how far it floats off the screen edge
 const PAD: f32 = 16.0;
 const HEADER: f32 = 34.0; // switcher row + gap
 const SHOULDER: f32 = 10.0;
@@ -179,6 +180,10 @@ struct View {
     look: (f32, f32),
     /// Scrolling for volume over the closed island: don't let hover open it.
     scroll_hold: bool,
+    /// Liquid Glass: the frosted screen behind this island's window, and
+    /// whether its ink is dark right now (bright backdrop, clear glass).
+    backdrop: Option<glass::Backdrop>,
+    glass_dark: bool,
 }
 
 struct App {
@@ -220,6 +225,9 @@ struct App {
     saved_timer: Timer,
     click_timer: Timer,
     raise_timer: Timer, // taskbar mode: back above the taskbar after a foreground change
+    fs_timer: Timer,    // a few full-screen re-checks after a foreground change
+    glass_timer: Timer, // Liquid Glass: look behind the island again (coalesced, or after a switch)
+    transparency: bool, // Windows "Transparency effects" (off: Liquid Glass stays still)
 
     timer: Option<TimerRun>,
     timer_tick: Timer,
@@ -1739,7 +1747,146 @@ impl App {
     /// Corner radius of the compact pill: in the taskbar a softer, rounder
     /// bottom (half the height, up to 18).
     fn compact_r(&self) -> f32 {
-        if self.cfg.taskbar { (self.compact_h() / 2.0).min(18.0).max(NOTCH_R) } else { NOTCH_R }
+        if self.cfg.taskbar {
+            (self.compact_h() / 2.0).min(18.0).max(NOTCH_R)
+        } else if self.pill_style() && !self.cfg.edge.vertical() {
+            COMPACT_H / 2.0 // a floating pill is a capsule
+        } else {
+            NOTCH_R
+        }
+    }
+
+    // ---------------- looks (1.0) ----------------
+
+    /// The island's `T.look`: 0 dark, 1 light, 2 Liquid Glass. "Use Windows
+    /// setting" follows Windows' app mode. In the taskbar Liquid Glass would
+    /// have to be a notch, which stays solid, so it shows dark there.
+    fn look(&self) -> i32 {
+        match self.cfg.theme {
+            3 if self.cfg.taskbar => 0,
+            3 => 2,
+            1 => 1,
+            2 => 0,
+            _ if system::apps_dark_mode() => 0,
+            _ => 1,
+        }
+    }
+
+    /// Dynamic pill chosen (Liquid Glass is always one); the taskbar keeps the notch.
+    fn pill_style(&self) -> bool {
+        !self.cfg.taskbar && (self.cfg.island_style == 1 || self.cfg.theme == 3)
+    }
+
+    /// How far this island floats off the screen edge (top and bottom edges only;
+    /// a side tab and a carried island stay as they are).
+    fn float_gap(&self, v: &View) -> f32 {
+        if self.pill_style() && !v.dragging && !self.cfg.edge.vertical() { FLOAT_GAP } else { 0.0 }
+    }
+
+    /// Live Liquid Glass: on, unless Still is picked, Windows transparency is off,
+    /// or battery saver is on.
+    fn glass_live(&self) -> bool {
+        // (same as look() == 2, without reading the registry)
+        self.cfg.theme == 3 && !self.cfg.taskbar && self.cfg.glass_live && self.transparency && !self.battery.saver
+    }
+
+    /// Push the look to every island, and start or stop live glass.
+    fn push_look(&mut self) {
+        let look = self.look();
+        for v in &self.views {
+            v.island.global::<IslandTheme>().set_look(look);
+        }
+        self.update_glass();
+    }
+
+    /// Live glass needs to hear about windows changing behind a shown island;
+    /// otherwise drop the captures and the hook.
+    fn update_glass(&mut self) {
+        let want = self.glass_live() && self.views.iter().any(|v| v.shown);
+        system::watch_backdrop(want);
+        if want {
+            self.capture_glass_all();
+        } else {
+            self.glass_timer.stop();
+            for v in &mut self.views {
+                v.backdrop = None;
+                v.glass_dark = false;
+                v.island.set_glass_live(false);
+                v.island.global::<IslandTheme>().set_glass_dark_ink(false);
+            }
+        }
+    }
+
+    fn capture_glass_all(&mut self) {
+        for i in 0..self.views.len() {
+            self.capture_glass(i);
+        }
+    }
+
+    /// Look at the screen behind island `i` (its whole window), then draw the glass.
+    fn capture_glass(&mut self, i: usize) {
+        if !self.glass_live() || !self.views[i].shown {
+            return;
+        }
+        let (ww, wh) = self.win_size(&self.views[i]);
+        let ours: Vec<HWND> = self.views.iter().map(|v| v.win.hwnd()).collect();
+        let v = &mut self.views[i];
+        let s = v.win.scale();
+        let (x, y) = v.win.pos();
+        v.backdrop = glass::capture(x, y, (ww * s).ceil() as i32, (wh * s).ceil() as i32, s, &ours);
+        self.render_glass(i);
+    }
+
+    /// Draw island `i`'s glass at the pill's current size (also every frame while it springs).
+    fn render_glass(&mut self, i: usize) {
+        let (x, y, w, h) = self.pill_now(&self.views[i]);
+        let tint = self.cfg.glass_tint;
+        let v = &mut self.views[i];
+        let Some(b) = &v.backdrop else {
+            v.island.set_glass_live(false);
+            return;
+        };
+        let s = v.win.scale();
+        let r = clamp_safe(v.r.value, 0.0, h / 2.0);
+        let out = b.render(x * s, y * s, w * s, h * s, r * s, s, tint, v.glass_dark);
+        // Dark ink over a bright backdrop, only with clear glass (a color tint
+        // keeps white ink); a gap between the two thresholds stops flicker.
+        let clear = tint & 0xff_ffff == 0xff_ffff;
+        let dark = clear && if v.glass_dark { out.luma > 0.5 } else { out.luma > 0.62 };
+        let out = if dark != v.glass_dark { b.render(x * s, y * s, w * s, h * s, r * s, s, tint, dark) } else { out };
+        v.glass_dark = dark;
+        v.island.set_glass_image(out.image);
+        v.island.set_glass_live(true);
+        v.island.global::<IslandTheme>().set_glass_dark_ink(dark);
+    }
+
+    /// Something changed behind the glass: look again shortly (bursts become one).
+    fn backdrop_changed(&mut self) {
+        system::backdrop_handled();
+        if !self.glass_live() || self.glass_timer.running() {
+            return;
+        }
+        self.glass_timer.start(TimerMode::SingleShot, Duration::from_millis(60), || {
+            with_app(|a| a.capture_glass_all());
+        });
+    }
+
+    /// After a foreground switch: now, and again once the window has animated in.
+    fn recapture_glass(&mut self, step: usize) {
+        const AFTER_MS: [u64; 2] = [220, 700];
+        if !self.glass_live() {
+            return;
+        }
+        if step == 0 {
+            self.capture_glass_all();
+        }
+        let Some(&ms) = AFTER_MS.get(step) else { return };
+        self.glass_timer.start(TimerMode::SingleShot, Duration::from_millis(ms), move || {
+            with_app(|a| {
+                a.capture_glass_all();
+                a.recapture_glass(step + 1);
+            });
+        });
     }
 
     fn tab_top(&self, v: &View) -> f32 {
@@ -1779,6 +1926,7 @@ impl App {
         // (lifted off it's a plain pill again, see `targets`)
         let (in_taskbar, compact_h) = if self.views[i].dragging { (false, COMPACT_H) } else { (self.cfg.taskbar, self.compact_h()) };
         let lyric_line = kind == C_MEDIA && self.synced_on();
+        let gap = self.float_gap(&self.views[i]);
         let v = &mut self.views[i];
         let growing = w > v.w.target + 0.5 || h > v.h.target + 0.5;
         for s in [&mut v.w, &mut v.h, &mut v.r, &mut v.a] {
@@ -1823,6 +1971,7 @@ impl App {
         isl.set_lyric_align(align);
         isl.set_pet_touch(touch);
         isl.set_in_taskbar(in_taskbar);
+        isl.set_float_gap(gap);
         isl.set_compact_h(compact_h);
         isl.set_lyric_line(lyric_line);
     }
@@ -1831,7 +1980,8 @@ impl App {
     fn frame(&mut self) -> bool {
         let now = Instant::now();
         let mut any = false;
-        for v in &mut self.views {
+        let mut reshaped = Vec::new();
+        for (i, v) in self.views.iter_mut().enumerate() {
             let dt = v.last_frame.map(|t| (now - t).as_secs_f32()).unwrap_or(1.0 / 120.0);
             let mut moving = false;
             moving |= v.w.step(dt);
@@ -1845,9 +1995,15 @@ impl App {
                 v.island.set_pill_h(h);
                 v.island.set_radius(clamp_safe(v.r.value, 0.0, h / 2.0));
                 v.island.set_anchor(v.a.value);
+                reshaped.push(i);
             }
             v.last_frame = if moving { Some(now) } else { None };
             any |= moving;
+        }
+        for i in reshaped {
+            if self.views[i].backdrop.is_some() {
+                self.render_glass(i);
+            }
         }
         any
     }
@@ -1933,12 +2089,15 @@ impl App {
             leave_timer: Timer::default(),
             look: (0.0, 0.0),
             scroll_hold: false,
+            backdrop: None,
+            glass_dark: false,
         })
     }
 
     /// Copy all shared state into one island (used for new islands).
     fn sync_island(&self, i: usize) {
         let isl = &self.views[i].island;
+        isl.global::<IslandTheme>().set_look(self.look());
         isl.set_clock_text(self.clock_text().into());
         isl.set_header_clock(self.header_clock(&self.views[i]).into());
         isl.set_art(self.art.clone());
@@ -2076,9 +2235,10 @@ impl App {
             }
         }
         self.update_wave();
-        // hidden (full screen, games): no peeks and no pointer hook
+        // hidden (full screen, games): no peeks, no pointer hook, no glass capture
         self.update_peek();
         self.update_pointer_watch();
+        self.update_glass();
     }
 
     fn check_fullscreen(&mut self) {
@@ -2090,6 +2250,21 @@ impl App {
             self.retarget();
             self.apply_visibility();
         }
+    }
+
+    /// A game becomes the foreground window first and switches to exclusive
+    /// full screen a moment later, and Windows sends nothing when it does. So
+    /// after each foreground change look again a few times, then stop: a
+    /// handful of one-shot checks, no polling.
+    fn recheck_fullscreen(&mut self, step: usize) {
+        const AFTER_MS: [u64; 3] = [300, 1200, 3500];
+        let Some(&ms) = AFTER_MS.get(step) else { return };
+        self.fs_timer.start(TimerMode::SingleShot, Duration::from_millis(ms), move || {
+            with_app(|a| {
+                a.check_fullscreen();
+                a.recheck_fullscreen(step + 1);
+            });
+        });
     }
 
     fn check_fullscreen_view(&mut self, i: usize) -> bool {
@@ -2104,7 +2279,13 @@ impl App {
         if fs != v.hidden_fullscreen {
             v.hidden_fullscreen = fs;
             if fs {
+                // and forget any hover in flight, so it can't open while hidden
                 v.expanded = false;
+                v.hovering = false;
+                v.pressed = false;
+                v.press_at = None;
+                v.hover_timer.stop();
+                v.leave_timer.stop();
             } else if self.cfg.keep_open {
                 // back from full screen: a pinned island opens again
                 self.expand(i);
@@ -2112,6 +2293,17 @@ impl App {
             return true;
         }
         false
+    }
+
+    /// A game has the pointer (confined mouse-look, or a full-screen app in
+    /// front): its hidden cursor may wander onto the island, so hover alone
+    /// mustn't open it. A click still does.
+    fn pointer_held_by_game(&self, i: usize) -> bool {
+        if system::cursor_confined() {
+            return true;
+        }
+        let ours: Vec<HWND> = self.views.iter().map(|v| v.win.hwnd()).collect();
+        system::fullscreen_on(self.views[i].monitor, &ours)
     }
 
     // ---------------- hover, press & drag ----------------
@@ -2129,17 +2321,43 @@ impl App {
         // (only meaningful on left/right edges; a tall top/bottom panel can leave
         // no room between the shoulders, so this must not panic)
         let side_y = clamp_safe(a - h / 2.0, SHOULDER, wh - h - SHOULDER);
+        let gap = self.float_gap(v);
         match self.edge_of(v) {
-            1 => ((ww - w) / 2.0, wh - h, w, h),
+            1 => ((ww - w) / 2.0, wh - h - gap, w, h),
             2 => (0.0, side_y, w, h),
             3 => (ww - w, side_y, w, h),
             4 => ((ww - w) / 2.0, (wh - h) / 2.0, w, h),
-            _ => ((ww - w) / 2.0, 0.0, w, h),
+            _ => ((ww - w) / 2.0, gap, w, h),
+        }
+    }
+
+    /// Where the pill is drawn right now (window logical px), for the glass.
+    fn pill_now(&self, v: &View) -> (f32, f32, f32, f32) {
+        let (ww, wh) = self.win_size(v);
+        let (w, h) = (v.w.value.max(4.0), v.h.value.max(4.0));
+        let side_y = clamp_safe(v.a.value - h / 2.0, SHOULDER, wh - h - SHOULDER);
+        let gap = self.float_gap(v);
+        match self.edge_of(v) {
+            1 => ((ww - w) / 2.0, wh - h - gap, w, h),
+            2 => (0.0, side_y, w, h),
+            3 => (ww - w, side_y, w, h),
+            4 => ((ww - w) / 2.0, (wh - h) / 2.0, w, h),
+            _ => ((ww - w) / 2.0, gap, w, h),
         }
     }
 
     fn over_pill(&self, v: &View, x: f32, y: f32) -> bool {
-        let (px, py, w, h) = self.pill_rect(v);
+        let (px, mut py, w, mut h) = self.pill_rect(v);
+        // a floating pill: the gap to the screen edge counts too
+        let gap = self.float_gap(v);
+        match self.edge_of(v) {
+            0 => {
+                py -= gap;
+                h += gap;
+            }
+            1 => h += gap,
+            _ => {}
+        }
         x >= px - 2.0 && x <= px + w + 2.0 && y >= py - 2.0 && y <= py + h + 2.0
     }
 
@@ -2284,16 +2502,22 @@ impl App {
         let hover_expand = self.cfg.hover_expand;
         let keep_open = self.cfg.keep_open;
         let carrying = self.carrying;
+        let wants_open = h && hover_expand && !self.views[i].expanded && !carrying;
+        let game = wants_open && self.pointer_held_by_game(i);
         let v = &mut self.views[i];
         v.hovering = h;
         if h {
             v.leave_timer.stop();
-            // carrying Mochi across the pill doesn't open it
-            if hover_expand && !v.expanded && !v.scroll_hold && !carrying {
+            // carrying Mochi across the pill doesn't open it, nor does a
+            // game's hidden cursor drifting onto it
+            if wants_open && !v.scroll_hold && !game {
                 // Hover intent: open only after the pointer rests a moment.
                 v.hover_timer.start(TimerMode::SingleShot, Duration::from_millis(delay), move || {
                     with_app(|a| {
-                        if !a.carrying && a.views.get(i).is_some_and(|v| v.hovering && !v.dragging && !v.scroll_hold) {
+                        if !a.carrying
+                            && a.views.get(i).is_some_and(|v| v.shown && v.hovering && !v.dragging && !v.scroll_hold)
+                            && !a.pointer_held_by_game(i)
+                        {
                             a.expand(i);
                         }
                     });
@@ -2336,8 +2560,8 @@ impl App {
         let panels = self.panels(&self.views[i]);
         let v = &mut self.views[i];
         v.hover_timer.stop();
-        if v.expanded {
-            return;
+        if v.expanded || v.hidden_fullscreen {
+            return; // hidden for a full-screen app: it never opens behind it
         }
         if tab {
             // side tab: open the panel of the glyph under the pointer
@@ -2375,6 +2599,9 @@ impl App {
         self.pet_jolt(i, true);
         if pet_panel {
             self.greet_mood();
+        }
+        if self.views[i].backdrop.is_some() {
+            self.capture_glass(i);
         }
     }
 
@@ -3394,6 +3621,7 @@ impl App {
         }
         if b.saver != old.saver {
             self.update_wave();
+            self.push_look(); // battery saver: still glass
         }
         if !show || initial {
             self.retarget();
@@ -3534,8 +3762,27 @@ impl App {
         let theme = self.settings.as_ref().map_or(self.cfg.theme, |s| s.get_theme());
         match theme {
             1 => false,
-            2 => true,
+            2 | 3 => true, // Liquid Glass: a dark window with the tint as accent
             _ => system::apps_dark_mode(),
+        }
+    }
+
+    /// Dress the Settings window for what it shows: light, dark, or glass
+    /// (dark, with the glass tint as accent), title bar included.
+    fn style_settings(&self) {
+        let Some(s) = &self.settings else { return };
+        let dark = self.settings_dark();
+        s.set_dark(dark);
+        let glass = s.get_theme() == 3;
+        s.set_glass_ui(glass);
+        // the tint as accent; one too dark to see on the dark window falls back to white
+        let t = rgb_u32(s.get_glass_tint());
+        let l = (0.2126 * ((t >> 16) & 0xff) as f32 + 0.7152 * ((t >> 8) & 0xff) as f32 + 0.0722 * (t & 0xff) as f32) / 255.0;
+        let accent = if l < 0.25 { 0xffffff } else { t };
+        s.set_accent(rgb(accent));
+        s.set_on_accent(rgb(if accent == 0xffffff || l > 0.6 { 0x000000 } else { 0xffffff }));
+        if let Some(w) = platform::native(s.window()) {
+            system::set_dark_title_bar(w.hwnd(), dark);
         }
     }
 
@@ -3611,9 +3858,7 @@ impl App {
         let Some(s) = &self.settings else { return };
         update_memory_text(s);
         let _ = s.show();
-        if let Some(w) = platform::native(s.window()) {
-            system::set_dark_title_bar(w.hwnd(), self.settings_dark());
-        }
+        self.style_settings();
         self.mem_timer.start(TimerMode::Repeated, Duration::from_secs(2), || {
             with_app(|a| {
                 if let Some(s) = &a.settings {
@@ -3645,7 +3890,6 @@ impl App {
         if !s.get_dirty() {
             fill_settings(s, c);
         }
-        s.set_dark(self.settings_dark());
         s.set_reduce_ui(self.reduce_motion());
         s.set_system_reduce_motion(!self.sys_anim);
         s.set_online_built(!game::RELAY.is_empty());
@@ -3693,13 +3937,9 @@ impl App {
             let (_, body, eyes) = pet::SKINS[(s.get_pet_skin() as usize).min(pet::SKINS.len() - 1)];
             push_pet_colors(s, body, eyes);
         }
-        if key == "theme" || key == "defaults" {
+        if key == "theme" || key == "tint" || key == "defaults" {
             // this window previews its theme right away
-            let dark = self.settings_dark();
-            s.set_dark(dark);
-            if let Some(w) = platform::native(s.window()) {
-                system::set_dark_title_bar(w.hwnd(), dark);
-            }
+            self.style_settings();
         }
     }
 
@@ -3745,9 +3985,7 @@ impl App {
         s.set_save_state(0);
         s.set_save_msg("".into());
         self.push_settings();
-        if let Some(w) = self.settings.as_ref().and_then(|s| platform::native(s.window())) {
-            system::set_dark_title_bar(w.hwnd(), self.settings_dark());
-        }
+        self.style_settings();
         if closing {
             self.close_settings();
         }
@@ -3756,15 +3994,11 @@ impl App {
     /// After a save: do what each changed setting needs, then refresh everything.
     fn apply_changes(&mut self, old: &Config) {
         let c = self.cfg.clone();
-        if c.theme != old.theme || c.reduce_motion != old.reduce_motion {
+        if c.theme != old.theme || c.glass_tint != old.glass_tint || c.reduce_motion != old.reduce_motion {
             if let Some(s) = &self.settings {
-                let dark = self.settings_dark();
-                s.set_dark(dark);
                 s.set_reduce_ui(self.reduce_motion());
-                if let Some(w) = platform::native(s.window()) {
-                    system::set_dark_title_bar(w.hwnd(), dark);
-                }
             }
+            self.style_settings();
         }
         if c.lyrics && !old.lyrics && self.lyrics.is_empty() {
             // refetch for the current song
@@ -3891,6 +4125,11 @@ impl App {
     /// every other setting (Save applies it).
     fn set_pet_color(&mut self, which: i32, c: u32) {
         let Some(s) = &self.settings else { return };
+        if which == 2 {
+            push_glass_tint(s, c);
+            self.settings_edit("tint");
+            return;
+        }
         let (mut body, mut eyes) = (rgb_u32(s.get_pet_body()), rgb_u32(s.get_pet_eyes()));
         if which == 0 {
             body = c;
@@ -3906,7 +4145,11 @@ impl App {
     fn pick_pet_color(&self, which: i32) {
         let Some(s) = &self.settings else { return };
         let Some(hwnd) = platform::native(s.window()).map(|w| w.hwnd()) else { return };
-        let initial = rgb_u32(if which == 0 { s.get_pet_body() } else { s.get_pet_eyes() });
+        let initial = rgb_u32(match which {
+            0 => s.get_pet_body(),
+            1 => s.get_pet_eyes(),
+            _ => s.get_glass_tint(),
+        });
         system::choose_color(hwnd, initial, move |picked| {
             if let Some(c) = picked {
                 post(move |a| a.set_pet_color(which, c));
@@ -4078,6 +4321,7 @@ impl App {
             }
         }
         self.sync_views();
+        self.push_look();
         self.update_pet_ui();
         self.update_timer_ui();
         self.on_power(true);
@@ -4116,15 +4360,23 @@ impl App {
             }
             system::WM_APP_FOREGROUND => {
                 self.check_fullscreen();
+                self.recheck_fullscreen(0);
+                self.recapture_glass(0);
                 if self.cfg.taskbar {
                     // the taskbar comes forward when it's clicked; stay on top of it.
                     // Show desktop (Win + D) raises it once more a moment later.
+                    // (Re-check first: a game going full screen must not get us
+                    // raised over it.)
                     self.raise_islands();
                     self.raise_timer.start(TimerMode::SingleShot, Duration::from_millis(150), || {
                         with_app(|a| {
+                            a.check_fullscreen();
                             a.raise_islands();
                             a.raise_timer.start(TimerMode::SingleShot, Duration::from_millis(450), || {
-                                with_app(|a| a.raise_islands());
+                                with_app(|a| {
+                                    a.check_fullscreen();
+                                    a.raise_islands();
+                                });
                             });
                         });
                     });
@@ -4142,11 +4394,18 @@ impl App {
                 self.sync_views();
                 None
             }
+            system::WM_APP_BACKDROP => {
+                self.backdrop_changed();
+                Some(LRESULT(0))
+            }
             WM_TIMECHANGE => {
                 self.refresh_date();
                 None
             }
             WM_SETTINGCHANGE => {
+                // light/dark mode, transparency or the wallpaper may have changed
+                self.transparency = system::transparency_enabled();
+                self.push_look();
                 self.resync_taskbar();
                 system::tray_refresh(platform::host_hwnd());
                 self.refresh_date(); // 12/24-hour or region format may have changed
@@ -4155,16 +4414,10 @@ impl App {
                     self.sys_anim = anim;
                     self.retarget();
                 }
-                if self.settings.is_some() {
-                    let dark = self.settings_dark();
-                    if let Some(s) = &self.settings {
-                        s.set_dark(dark);
-                        s.set_system_reduce_motion(!self.sys_anim);
-                        if let Some(w) = platform::native(s.window()) {
-                            system::set_dark_title_bar(w.hwnd(), dark);
-                        }
-                    }
+                if let Some(s) = &self.settings {
+                    s.set_system_reduce_motion(!self.sys_anim);
                 }
+                self.style_settings();
                 self.place_all();
                 None
             }
@@ -4228,6 +4481,9 @@ fn fill_settings(s: &SettingsWindow, c: &Config) {
     s.set_hover_expand(c.hover_expand);
     s.set_hover_delay(c.hover_delay as f32);
     s.set_theme(c.theme);
+    s.set_island_style(c.island_style);
+    push_glass_tint(s, c.glass_tint);
+    s.set_glass_live(c.glass_live);
     s.set_reduce_motion(c.reduce_motion);
     s.set_show_on(c.show_on);
     s.set_pill_glance(c.pill_glance);
@@ -4270,6 +4526,13 @@ fn fill_settings(s: &SettingsWindow, c: &Config) {
 }
 
 /// Mochi's body and eye colors into the settings window, with the hints that go with them.
+/// Settings > Theme > Glass tint: the color, and whether it's one of the dots.
+fn push_glass_tint(s: &SettingsWindow, tint: u32) {
+    const DOTS: [u32; 5] = [0xffffff, 0x1482ff, 0xec488c, 0x1ebe96, 0x282830];
+    s.set_glass_tint(rgb(tint));
+    s.set_glass_tint_custom(!DOTS.contains(&tint));
+}
+
 fn push_pet_colors(s: &SettingsWindow, body: u32, eyes: u32) {
     const BODIES: [u32; 8] = [0x000000, 0x3a3a3a, 0xf5f5f5, 0xfc90bc, 0xf99f55, 0xd3b63b, 0x6fd087, 0x71bfff];
     const EYES: [u32; 7] = [0xd3b63b, 0x000000, 0xffffff, 0xfc90bc, 0xf99f55, 0x6fd087, 0x71bfff];
@@ -4319,7 +4582,10 @@ fn read_settings(s: &SettingsWindow, c: &mut Config) {
     c.side_style = s.get_side_style().clamp(0, 2);
     c.hover_expand = s.get_hover_expand();
     c.hover_delay = s.get_hover_delay().clamp(100.0, 1000.0) as u32;
-    c.theme = s.get_theme().clamp(0, 2);
+    c.theme = s.get_theme().clamp(0, 3);
+    c.island_style = s.get_island_style().clamp(0, 1);
+    c.glass_tint = rgb_u32(s.get_glass_tint());
+    c.glass_live = s.get_glass_live();
     c.reduce_motion = s.get_reduce_motion();
     c.show_on = s.get_show_on().clamp(0, 2);
     c.pill_glance = s.get_pill_glance();
@@ -4682,6 +4948,9 @@ pub fn run() -> Result<(), slint::PlatformError> {
         saved_timer: Timer::default(),
         click_timer: Timer::default(),
         raise_timer: Timer::default(),
+        fs_timer: Timer::default(),
+        glass_timer: Timer::default(),
+        transparency: system::transparency_enabled(),
         timer: None,
         timer_tick: Timer::default(),
         privacy: live::Privacy::default(),

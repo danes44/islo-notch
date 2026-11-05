@@ -1,4 +1,4 @@
-// Islo settings app — follows the Windows light/dark theme (the island is always dark).
+// Islo settings app — follows Settings > Theme with the island (Liquid Glass: dark, with the tint as accent).
 // Built from the Islo design system: monochrome controls, feature color only on
 // feature glyphs, "Saved" confirmation per row, calm motion (no bounce).
 
@@ -7,6 +7,10 @@ import { Icon, LineIcon, Icons, BrandMark, Mochi } from "icons.slint";
 export global S {
     in property <bool> dark: true;
     in property <bool> reduce: false;
+    // Liquid Glass: the window is dark and the glass tint is its accent
+    in property <bool> glass: false;
+    in property <color> accent: #ffffff;
+    in property <color> on-accent: #000000;
     out property <color> surface-100: dark ? #000000 : #f3f3f3;
     out property <color> surface-200: dark ? #111111 : #ffffff;
     out property <color> surface-300: dark ? #2a2a2a : #ebebeb;
@@ -15,8 +19,8 @@ export global S {
     out property <color> ink: dark ? #ffffff : #0a0a0a;
     out property <color> ink-muted: dark ? #b4b4b4 : #5e5e5e;
     out property <color> ink-faint: dark ? #949494 : #696969;
-    out property <color> primary: dark ? #ffffff : #0a0a0a;
-    out property <color> on-primary: dark ? #000000 : #ffffff;
+    out property <color> primary: glass ? accent : dark ? #ffffff : #0a0a0a;
+    out property <color> on-primary: glass ? on-accent : dark ? #000000 : #ffffff;
     out property <color> positive: dark ? #46a758 : #2e7d32;
     out property <color> rose: dark ? #fc90bc : #b54879;
     out property <color> orange: dark ? #f99f55 : #ab5e0c;
@@ -448,11 +452,20 @@ export component SettingsWindow inherits Window {
 
     in property <bool> dark: true;
     in property <bool> reduce-ui: false;
+    in property <bool> glass-ui: false;
+    in property <color> accent: #ffffff;
+    in property <color> on-accent: #000000;
     changed dark => { S.dark = root.dark; }
     changed reduce-ui => { S.reduce = root.reduce-ui; }
+    changed glass-ui => { S.glass = root.glass-ui; }
+    changed accent => { S.accent = root.accent; }
+    changed on-accent => { S.on-accent = root.on-accent; }
     init => {
         S.dark = root.dark;
         S.reduce = root.reduce-ui;
+        S.glass = root.glass-ui;
+        S.accent = root.accent;
+        S.on-accent = root.on-accent;
     }
 
     in-out property <int> page: 1; // 0 General, 1 Appearance, 2 Modules, 3 Shortcuts, 4 About
@@ -470,7 +483,11 @@ export component SettingsWindow inherits Window {
     in-out property <int> side-style: 0;
     in-out property <bool> hover-expand: true;
     in-out property <float> hover-delay: 300;
-    in-out property <int> theme: 0;
+    in-out property <int> theme: 0;      // 0 Windows, 1 light, 2 dark, 3 Liquid Glass (island and this window)
+    in-out property <int> island-style: 0; // 0 notch, 1 dynamic pill
+    in-out property <color> glass-tint: #ffffff;
+    in property <bool> glass-tint-custom: false;
+    in-out property <bool> glass-live: true;
     in-out property <bool> reduce-motion: false;
     in property <bool> system-reduce-motion: false;
     in-out property <int> show-on: 0;
@@ -544,8 +561,8 @@ export component SettingsWindow inherits Window {
     callback open-releases();
     callback set-up-notifications();
     callback remove-notifications();
-    callback set-pet-color(int, color); // 0 body, 1 eyes
-    callback pick-pet-color(int);       // Windows' color picker for body (0) or eyes (1)
+    callback set-pet-color(int, color); // 0 body, 1 eyes, 2 glass tint
+    callback pick-pet-color(int);       // Windows' color picker for body (0), eyes (1) or glass tint (2)
 
     HorizontalLayout {
         // ---------- sidebar ----------
@@ -787,15 +804,58 @@ export component SettingsWindow inherits Window {
                     Card {
                         Row {
                             first: true;
-                            name: "App theme";
+                            name: "Theme";
                             min-h: 78px;
-                            desc: "Changes this window. The island stays black in every theme.";
+                            desc: "Sets the island and this window together. “Use Windows setting” picks Light or Dark from Windows.";
                             saved: root.saved-key == "theme";
                             Segmented {
                                 y: 12px;
-                                options: ["Use Windows setting", "Light", "Dark"];
+                                options: ["Use Windows setting", "Light", "Dark", "Liquid Glass"];
                                 current <=> root.theme;
                                 selected => { root.changed("theme"); }
+                            }
+                        }
+                        Row {
+                            name: "Island style";
+                            min-h: 78px;
+                            desc: root.taskbar ? "In the taskbar the island is always a notch."
+                                : root.theme == 3 ? "Liquid Glass is always a dynamic pill."
+                                : "A notch joined to the screen edge, or a pill that floats just below it.";
+                            saved: root.saved-key == "style";
+                            Segmented {
+                                y: 12px;
+                                options: ["Notch", "Dynamic pill"];
+                                current <=> root.island-style;
+                                selected => { root.changed("style"); }
+                            }
+                        }
+                        if root.theme == 3 : Row {
+                            name: "Glass tint";
+                            min-h: 64px;
+                            desc: "Colors the glass, and this window’s highlights. White is clear glass.";
+                            saved: root.saved-key == "tint";
+                            ColorPicker {
+                                y: 12px;
+                                colors: [#ffffff, #1482ff, #ec488c, #1ebe96, #282830];
+                                current: root.glass-tint;
+                                custom-active: root.glass-tint-custom;
+                                picked(c) => { root.set-pet-color(2, c); }
+                                custom => { root.pick-pet-color(2); }
+                            }
+                        }
+                        if root.theme == 3 : Row {
+                            name: "Glass effects";
+                            min-h: 78px;
+                            desc: "Live bends and colors what’s behind the island. Still never looks at the screen. Battery saver and Windows’ Transparency effects switch it to Still too.";
+                            saved: root.saved-key == "glasslive";
+                            Segmented {
+                                y: 12px;
+                                options: ["Live", "Still"];
+                                current: root.glass-live ? 0 : 1;
+                                selected(i) => {
+                                    root.glass-live = i == 0;
+                                    root.changed("glasslive");
+                                }
                             }
                         }
                         Row {

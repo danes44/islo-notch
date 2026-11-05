@@ -445,7 +445,8 @@ impl WinWindow {
             // Windows minimizes the island when the taskbar is clicked; islands
             // never minimize, so put it straight back (and back on top).
             WM_SYSCOMMAND if self.kind == Kind::Island && (wp.0 & 0xfff0) as u32 == SC_MINIMIZE => Some(LRESULT(0)),
-            WM_SIZE if self.kind == Kind::Island && wp.0 as u32 == SIZE_MINIMIZED => {
+            // (only a visible island: one hidden for a full-screen game stays hidden)
+            WM_SIZE if self.kind == Kind::Island && wp.0 as u32 == SIZE_MINIMIZED && unsafe { IsWindowVisible(hwnd) }.as_bool() => {
                 unsafe {
                     let _ = ShowWindowAsync(hwnd, SW_SHOWNOACTIVATE);
                     let _ = SetWindowPos(hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);

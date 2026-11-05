@@ -19,6 +19,7 @@ pub const WM_APP_TRAY: u32 = WM_APP + 10;
 pub const WM_APP_APPBAR: u32 = WM_APP + 11;
 pub const WM_APP_FOREGROUND: u32 = WM_APP + 12;
 pub const WM_APP_START_DRAG: u32 = WM_APP + 13;
+pub const WM_APP_BACKDROP: u32 = WM_APP + 14;
 
 pub fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(Some(0)).collect()
@@ -119,7 +120,10 @@ unsafe extern "system" fn foreground_hook(_: HWINEVENTHOOK, _: u32, _: HWND, _: 
 pub fn fullscreen_on(monitor: HMONITOR, ours: &[HWND]) -> bool {
     unsafe {
         if let Ok(state) = SHQueryUserNotificationState() {
-            if state == QUNS_RUNNING_D3D_FULL_SCREEN || state == QUNS_PRESENTATION_MODE {
+            // D3D_FULL_SCREEN: exclusive full screen. BUSY: other full-screen
+            // ("rude") apps, which is how Windows 10/11 often reports exclusive
+            // games running with fullscreen optimizations.
+            if state == QUNS_RUNNING_D3D_FULL_SCREEN || state == QUNS_BUSY || state == QUNS_PRESENTATION_MODE {
                 let fg = GetForegroundWindow();
                 if fg.is_invalid() || MonitorFromWindow(fg, MONITOR_DEFAULTTONEAREST) == monitor {
                     return true;
@@ -146,6 +150,79 @@ pub fn fullscreen_on(monitor: HMONITOR, ours: &[HWND]) -> bool {
         let m = monitor_rect(monitor);
         r.left <= m.left && r.top <= m.top && r.right >= m.right && r.bottom >= m.bottom
     }
+}
+
+/// Is a game holding the pointer? Mouse-look games (raw input) confine the
+/// hidden cursor with ClipCursor, and it then slides along the screen edge as
+/// you turn, so it can rest on the island without you ever reaching for it.
+pub fn cursor_confined() -> bool {
+    unsafe {
+        let mut clip = RECT::default();
+        if GetClipCursor(&mut clip).is_err() {
+            return false;
+        }
+        let x = GetSystemMetrics(SM_XVIRTUALSCREEN);
+        let y = GetSystemMetrics(SM_YVIRTUALSCREEN);
+        let w = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+        let h = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+        clip.left > x || clip.top > y || clip.right < x + w || clip.bottom < y + h
+    }
+}
+
+// ---------------- Liquid Glass: what's behind the island ----------------
+//
+// The glass shows the screen behind it, so it must hear when that changes: a
+// window moved, resized, minimized or restored. A WinEvent hook tells us (no
+// polling); it's only installed while live glass is on screen. A burst of
+// events (dragging a window) posts one message until the app has handled it.
+
+static BACKDROP_PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+thread_local! {
+    static BACKDROP_HOOKS: std::cell::Cell<[isize; 2]> = const { std::cell::Cell::new([0, 0]) };
+}
+
+unsafe extern "system" fn backdrop_hook(_: HWINEVENTHOOK, _: u32, hwnd: HWND, id_object: i32, id_child: i32, _: u32, _: u32) {
+    // whole windows only (not the caret or the pointer moving)
+    if id_object != OBJID_WINDOW.0 || id_child != CHILDID_SELF as i32 || hwnd.is_invalid() {
+        return;
+    }
+    if !BACKDROP_PENDING.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        unsafe {
+            let _ = PostMessageW(Some(crate::platform::host_hwnd()), WM_APP_BACKDROP, WPARAM(0), LPARAM(0));
+        }
+    }
+}
+
+/// The app handled WM_APP_BACKDROP: the next change may post again.
+pub fn backdrop_handled() {
+    BACKDROP_PENDING.store(false, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Listen (true) or stop listening (false) for windows changing behind the glass.
+pub fn watch_backdrop(on: bool) {
+    BACKDROP_HOOKS.with(|h| {
+        let cur = h.get();
+        unsafe {
+            if on && cur[0] == 0 {
+                let a = SetWinEventHook(EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE, None, Some(backdrop_hook), 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+                let b = SetWinEventHook(EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZEEND, None, Some(backdrop_hook), 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+                h.set([a.0 as isize, b.0 as isize]);
+            } else if !on && cur[0] != 0 {
+                for x in cur {
+                    if x != 0 {
+                        let _ = UnhookWinEvent(HWINEVENTHOOK(x as _));
+                    }
+                }
+                h.set([0, 0]);
+            }
+        }
+    });
+}
+
+/// Windows "Transparency effects" (Settings > Personalization > Colors).
+pub fn transparency_enabled() -> bool {
+    reg_dword(HKEY_CURRENT_USER, w!("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize"), w!("EnableTransparency")) != Some(0)
 }
 
 // ---------------- monitors ----------------
