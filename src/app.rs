@@ -239,6 +239,7 @@ struct App {
 
     timer: Option<TimerRun>,
     timer_tick: Timer,
+    zorder_guard: Timer,
     privacy: live::Privacy,
     focus_on: bool,
     /// Esc is registered as a hotkey only while the island was opened from the keyboard.
@@ -2193,6 +2194,18 @@ impl App {
         for v in self.views.iter().filter(|v| v.shown) {
             system::raise_topmost(v.win.hwnd());
         }
+    }
+
+    /// Slow guard: the taskbar can climb over the island without any event we
+    /// receive (click, hover, Explorer restart), so re-raise when it's above.
+    fn start_zorder_guard(&mut self) {
+        self.zorder_guard.start(TimerMode::Repeated, Duration::from_millis(500), || {
+            with_app(|a| {
+                if a.views.iter().any(|v| v.shown && system::tray_above(v.win.hwnd())) {
+                    a.raise_islands();
+                }
+            });
+        });
     }
 
     fn place_all(&mut self) {
@@ -4413,6 +4426,7 @@ impl App {
     /// Apply the whole config to the live islands.
     fn apply_config(&mut self) {
         self.sync_taskbar();
+        self.start_zorder_guard();
         shelf::set_accepting(self.cfg.shelf);
         self.update_notify();
         self.update_ble();
@@ -4472,25 +4486,23 @@ impl App {
                 self.check_fullscreen();
                 self.recheck_fullscreen(0);
                 self.recapture_glass(0);
-                if self.cfg.taskbar {
-                    // the taskbar comes forward when it's clicked; stay on top of it.
-                    // Show desktop (Win + D) raises it once more a moment later.
-                    // (Re-check first: a game going full screen must not get us
-                    // raised over it.)
-                    self.raise_islands();
-                    self.raise_timer.start(TimerMode::SingleShot, Duration::from_millis(150), || {
-                        with_app(|a| {
-                            a.check_fullscreen();
-                            a.raise_islands();
-                            a.raise_timer.start(TimerMode::SingleShot, Duration::from_millis(450), || {
-                                with_app(|a| {
-                                    a.check_fullscreen();
-                                    a.raise_islands();
-                                });
+                // the taskbar comes forward when it's clicked; stay on top of it.
+                // Show desktop (Win + D) raises it once more a moment later.
+                // (Any mode: with a fixed taskbar the island must never sit under it.
+                // Re-check first: a game going full screen must not get us raised over it.)
+                self.raise_islands();
+                self.raise_timer.start(TimerMode::SingleShot, Duration::from_millis(150), || {
+                    with_app(|a| {
+                        a.check_fullscreen();
+                        a.raise_islands();
+                        a.raise_timer.start(TimerMode::SingleShot, Duration::from_millis(450), || {
+                            with_app(|a| {
+                                a.check_fullscreen();
+                                a.raise_islands();
                             });
                         });
                     });
-                }
+                });
                 if self.cfg.show_on == 2 {
                     // follow the display you're working on
                     let m = system::monitor_at_cursor();
@@ -5113,6 +5125,7 @@ pub fn run() -> Result<(), slint::PlatformError> {
         transparency: system::transparency_enabled(),
         timer: None,
         timer_tick: Timer::default(),
+        zorder_guard: Timer::default(),
         privacy: live::Privacy::default(),
         focus_on: false,
         esc_armed: false,
