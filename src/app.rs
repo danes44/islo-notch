@@ -218,6 +218,7 @@ struct App {
 
     timer: Option<TimerRun>,
     timer_tick: Timer,
+    zorder_guard: Timer,
     privacy: live::Privacy,
     focus_on: bool,
     /// Esc is registered as a hotkey only while the island was opened from the keyboard.
@@ -2000,6 +2001,18 @@ impl App {
         for v in self.views.iter().filter(|v| v.shown) {
             system::raise_topmost(v.win.hwnd());
         }
+    }
+
+    /// Slow guard: the taskbar can climb over the island without any event we
+    /// receive (click, hover, Explorer restart), so re-raise when it's above.
+    fn start_zorder_guard(&mut self) {
+        self.zorder_guard.start(TimerMode::Repeated, Duration::from_millis(500), || {
+            with_app(|a| {
+                if a.views.iter().any(|v| v.shown && system::tray_above(v.win.hwnd())) {
+                    a.raise_islands();
+                }
+            });
+        });
     }
 
     fn place_all(&mut self) {
@@ -4033,6 +4046,7 @@ impl App {
     /// Apply the whole config to the live islands.
     fn apply_config(&mut self) {
         self.sync_taskbar();
+        self.start_zorder_guard();
         shelf::set_accepting(self.cfg.shelf);
         self.update_notify();
         self.update_ble();
@@ -4089,15 +4103,14 @@ impl App {
             }
             system::WM_APP_FOREGROUND => {
                 self.check_fullscreen();
-                if self.cfg.taskbar {
-                    // the taskbar comes forward when it's clicked; stay on top of it.
-                    // Show desktop (Win + D) raises it once more a moment later.
-                    self.raise_islands();
-                    for ms in [150, 600] {
-                        slint::Timer::single_shot(Duration::from_millis(ms), || {
-                            with_app(|a| a.raise_islands());
-                        });
-                    }
+                // the taskbar comes forward when it's clicked; stay on top of it.
+                // Show desktop (Win + D) raises it once more a moment later.
+                // (Any mode: with a fixed taskbar the island must never sit under it.)
+                self.raise_islands();
+                for ms in [150, 600] {
+                    slint::Timer::single_shot(Duration::from_millis(ms), || {
+                        with_app(|a| a.raise_islands());
+                    });
                 }
                 if self.cfg.show_on == 2 {
                     // follow the display you're working on
@@ -4637,6 +4650,7 @@ pub fn run() -> Result<(), slint::PlatformError> {
         click_timer: Timer::default(),
         timer: None,
         timer_tick: Timer::default(),
+        zorder_guard: Timer::default(),
         privacy: live::Privacy::default(),
         focus_on: false,
         esc_armed: false,

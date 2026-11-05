@@ -282,6 +282,28 @@ pub fn raise_topmost(hwnd: HWND) {
     }
 }
 
+/// Is a taskbar window stacked above `hwnd`? The taskbar re-raises itself over
+/// other topmost windows on click, hover, or Explorer restarts, with no
+/// foreground change we could hook, so this is checked on a slow timer.
+pub fn tray_above(hwnd: HWND) -> bool {
+    unsafe {
+        let mut cur = hwnd;
+        for _ in 0..512 {
+            let Ok(prev) = GetWindow(cur, GW_HWNDPREV) else { return false };
+            if prev.is_invalid() {
+                return false;
+            }
+            let mut class = [0u16; 32];
+            let n = GetClassNameW(prev, &mut class) as usize;
+            if matches!(String::from_utf16_lossy(&class[..n]).as_str(), "Shell_TrayWnd" | "Shell_SecondaryTrayWnd") {
+                return true;
+            }
+            cur = prev;
+        }
+        false
+    }
+}
+
 pub fn apps_dark_mode() -> bool {
     reg_dword(HKEY_CURRENT_USER, w!("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize"), w!("AppsUseLightTheme")) == Some(0)
 }
