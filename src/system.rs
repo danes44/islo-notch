@@ -447,6 +447,27 @@ pub fn taskbar_thickness() -> i32 {
     if abd.uEdge == ABE_TOP || abd.uEdge == ABE_BOTTOM { r.bottom - r.top } else { r.right - r.left }
 }
 
+/// Did Windows answer a taskbar position query at all? It can fail for a
+/// moment while Explorer starts or restarts; that must not count as "no taskbar".
+pub fn taskbar_found() -> bool {
+    let mut abd = APPBARDATA { cbSize: std::mem::size_of::<APPBARDATA>() as u32, ..Default::default() };
+    unsafe { SHAppBarMessage(ABM_GETTASKBARPOS, &mut abd) != 0 }
+}
+
+/// An island that should be on screen but isn't: hidden or minimized by
+/// Windows (Explorer restart, session unlock, show desktop) or under the taskbar.
+pub fn island_lost(hwnd: HWND) -> bool {
+    unsafe { !IsWindowVisible(hwnd).as_bool() || IsIconic(hwnd).as_bool() || tray_above(hwnd) }
+}
+
+/// Show an island again (without taking focus) and put it on top.
+pub fn restore_island(hwnd: HWND) {
+    unsafe {
+        let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+    }
+    raise_topmost(hwnd);
+}
+
 /// Put an island back above the taskbar (clicking the taskbar raises it over
 /// every other topmost window).
 pub fn raise_topmost(hwnd: HWND) {
