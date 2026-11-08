@@ -468,6 +468,19 @@ pub fn restore_island(hwnd: HWND) {
     raise_topmost(hwnd);
 }
 
+/// Let mouse input fall through the island to the window beneath (a game in
+/// full screen), or take it again.
+pub fn set_click_through(hwnd: HWND, on: bool) {
+    unsafe {
+        let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        let t = WS_EX_TRANSPARENT.0 as isize;
+        let new = if on { ex | t } else { ex & !t };
+        if new != ex {
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new);
+        }
+    }
+}
+
 /// Put an island back above the taskbar (clicking the taskbar raises it over
 /// every other topmost window).
 pub fn raise_topmost(hwnd: HWND) {
