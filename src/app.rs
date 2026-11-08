@@ -173,6 +173,8 @@ struct View {
     dragging: bool,
     suppress_click: bool,
     hidden_fullscreen: bool,
+    /// An app covers this display (a game): click-through and no raising, even if shown.
+    fullscreen_app: bool,
     shown: bool,
     hover_timer: Timer,
     leave_timer: Timer,
@@ -2085,6 +2087,7 @@ impl App {
             dragging: false,
             suppress_click: false,
             hidden_fullscreen: false,
+            fullscreen_app: false,
             shown: false,
             hover_timer: Timer::default(),
             leave_timer: Timer::default(),
@@ -2180,7 +2183,7 @@ impl App {
     }
 
     fn raise_islands(&self) {
-        for v in self.views.iter().filter(|v| v.shown) {
+        for v in self.views.iter().filter(|v| v.shown && !v.fullscreen_app) {
             system::raise_topmost(v.win.hwnd());
         }
     }
@@ -2190,7 +2193,7 @@ impl App {
     fn start_zorder_guard(&mut self) {
         self.zorder_guard.start(TimerMode::Repeated, Duration::from_millis(500), || {
             with_app(|a| {
-                for v in a.views.iter().filter(|v| v.shown && system::island_lost(v.win.hwnd())) {
+                for v in a.views.iter().filter(|v| v.shown && !v.fullscreen_app && system::island_lost(v.win.hwnd())) {
                     system::restore_island(v.win.hwnd());
                 }
             });
@@ -2287,8 +2290,23 @@ impl App {
                 ours.push(w.hwnd());
             }
         }
-        let fs = self.cfg.hide_fullscreen && system::fullscreen_on(self.views[i].monitor, &ours);
+        let covered = system::fullscreen_on(self.views[i].monitor, &ours);
+        let fs = self.cfg.hide_fullscreen && covered;
         let v = &mut self.views[i];
+        let mut changed = false;
+        if covered != v.fullscreen_app {
+            changed = true;
+            // Even when the island stays visible over a game, it must not catch
+            // hover or clicks meant for the game, nor fight it for the top.
+            v.fullscreen_app = covered;
+            system::set_click_through(v.win.hwnd(), covered);
+            if covered {
+                v.expanded = false;
+                v.hovering = false;
+            } else {
+                system::restore_island(v.win.hwnd());
+            }
+        }
         if fs != v.hidden_fullscreen {
             v.hidden_fullscreen = fs;
             if fs {
@@ -2305,7 +2323,7 @@ impl App {
             }
             return true;
         }
-        false
+        changed
     }
 
     /// A game has the pointer (confined mouse-look, or a full-screen app in
