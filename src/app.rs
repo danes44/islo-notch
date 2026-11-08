@@ -2190,8 +2190,8 @@ impl App {
     fn start_zorder_guard(&mut self) {
         self.zorder_guard.start(TimerMode::Repeated, Duration::from_millis(500), || {
             with_app(|a| {
-                if a.views.iter().any(|v| v.shown && system::tray_above(v.win.hwnd())) {
-                    a.raise_islands();
+                for v in a.views.iter().filter(|v| v.shown && system::island_lost(v.win.hwnd())) {
+                    system::restore_island(v.win.hwnd());
                 }
             });
         });
@@ -4906,9 +4906,11 @@ fn host_handler(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM, taskbar_created: u
         }
         m if m == taskbar_created && m != 0 => {
             system::tray_add(hwnd);
+            // Explorer restarted: the new taskbar sits over the islands
             with_app(|a| {
                 a.resync_taskbar();
                 a.place_all();
+                a.raise_islands();
             });
             Some(LRESULT(0))
         }
