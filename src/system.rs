@@ -447,11 +447,60 @@ pub fn taskbar_thickness() -> i32 {
     if abd.uEdge == ABE_TOP || abd.uEdge == ABE_BOTTOM { r.bottom - r.top } else { r.right - r.left }
 }
 
+/// An island that should be on screen but isn't: hidden or minimized by
+/// Windows (Explorer restart, session unlock, show desktop) or under the taskbar.
+pub fn island_lost(hwnd: HWND) -> bool {
+    unsafe { !IsWindowVisible(hwnd).as_bool() || IsIconic(hwnd).as_bool() || tray_above(hwnd) }
+}
+
+/// Show an island again (without taking focus) and put it on top.
+pub fn restore_island(hwnd: HWND) {
+    unsafe {
+        let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+    }
+    raise_topmost(hwnd);
+}
+
+/// Let mouse input fall through the island to the window beneath (a game in
+/// full screen), or take it again.
+pub fn set_click_through(hwnd: HWND, on: bool) {
+    unsafe {
+        let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        let t = WS_EX_TRANSPARENT.0 as isize;
+        let new = if on { ex | t } else { ex & !t };
+        if new != ex {
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new);
+        }
+    }
+}
+
 /// Put an island back above the taskbar (clicking the taskbar raises it over
 /// every other topmost window).
 pub fn raise_topmost(hwnd: HWND) {
     unsafe {
         let _ = SetWindowPos(hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+}
+
+/// Is a taskbar window stacked above `hwnd`? The taskbar re-raises itself over
+/// other topmost windows on click, hover, or Explorer restarts, with no
+/// foreground change we could hook, so this is checked on a slow timer.
+pub fn tray_above(hwnd: HWND) -> bool {
+    unsafe {
+        let mut cur = hwnd;
+        for _ in 0..512 {
+            let Ok(prev) = GetWindow(cur, GW_HWNDPREV) else { return false };
+            if prev.is_invalid() {
+                return false;
+            }
+            let mut class = [0u16; 32];
+            let n = GetClassNameW(prev, &mut class) as usize;
+            if matches!(String::from_utf16_lossy(&class[..n]).as_str(), "Shell_TrayWnd" | "Shell_SecondaryTrayWnd") {
+                return true;
+            }
+            cur = prev;
+        }
+        false
     }
 }
 
