@@ -26,6 +26,8 @@ mod live;
 #[cfg(windows)]
 mod lyrics;
 #[cfg(windows)]
+mod jump;
+#[cfg(windows)]
 mod media;
 #[cfg(windows)]
 mod notify;

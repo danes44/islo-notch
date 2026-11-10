@@ -6,12 +6,78 @@ use std::sync::mpsc::{Sender, channel};
 use windows::Win32::Media::Audio::Endpoints::*;
 use windows::Win32::Media::Audio::*;
 use windows::Win32::System::Com::*;
-use windows::core::{PCWSTR, implement};
+use windows::core::{Interface, PCWSTR, implement};
 
 pub enum Cmd {
     /// Change volume by this many percentage points.
     Step(f32),
+    ToggleMute,
     Reacquire,
+}
+
+// ---------------- per-app volume (the Volume mixer) ----------------
+
+/// What to look for in an audio session's id to tell it belongs to a media
+/// session's app: the exe ("\chrome.exe") or a Store app's package name.
+/// The id holds the process path, e.g. "...|\Device\HarddiskVolume3\Program
+/// Files\Google\Chrome\Application\chrome.exe%b{...}".
+pub fn app_needles(aumid: &str) -> Vec<String> {
+    let lower = aumid.to_lowercase();
+    let mut n = Vec::new();
+    let exe = crate::jump::exe_hint(aumid);
+    if !exe.is_empty() {
+        n.push(format!("\\{exe}"));
+    }
+    if let Some((pkg, _)) = lower.split_once('!') {
+        n.push(pkg.split('_').next().unwrap_or(pkg).to_string());
+    }
+    n
+}
+
+/// Every audio session of the default output whose id has one of `needles`.
+fn app_sessions(needles: &[String]) -> Vec<ISimpleAudioVolume> {
+    if needles.is_empty() {
+        return Vec::new();
+    }
+    unsafe {
+        let found = || -> Option<Vec<ISimpleAudioVolume>> {
+            let e: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).ok()?;
+            let dev = e.GetDefaultAudioEndpoint(eRender, eConsole).ok()?;
+            let mgr: IAudioSessionManager2 = dev.Activate(CLSCTX_ALL, None).ok()?;
+            let list = mgr.GetSessionEnumerator().ok()?;
+            let mut out = Vec::new();
+            for k in 0..list.GetCount().unwrap_or(0) {
+                let Ok(c) = list.GetSession(k) else { continue };
+                let Ok(c2) = c.cast::<IAudioSessionControl2>() else { continue };
+                let Ok(id) = c2.GetSessionInstanceIdentifier() else { continue };
+                let s = id.to_string().unwrap_or_default().to_lowercase();
+                CoTaskMemFree(Some(id.0 as *const _));
+                if needles.iter().any(|n| s.contains(n.as_str())) {
+                    if let Ok(v) = c.cast::<ISimpleAudioVolume>() {
+                        out.push(v);
+                    }
+                }
+            }
+            Some(out)
+        };
+        found().unwrap_or_default()
+    }
+}
+
+/// The app's own volume (0..1), if it has an audio session.
+pub fn app_volume(needles: &[String]) -> Option<f32> {
+    app_sessions(needles).iter().filter_map(|v| unsafe { v.GetMasterVolume().ok() }).reduce(f32::max)
+}
+
+pub fn set_app_volume(needles: &[String], level: f32) {
+    for v in app_sessions(needles) {
+        unsafe {
+            let _ = v.SetMasterVolume(level.clamp(0.0, 1.0), std::ptr::null());
+            if level > 0.0 {
+                let _ = v.SetMute(false, std::ptr::null());
+            }
+        }
+    }
 }
 
 /// (volume 0..1, muted, is_initial_value)
@@ -89,6 +155,12 @@ pub fn start(cb: impl Fn(f32, bool, bool) + Send + Sync + 'static) -> Sender<Cmd
                             if next > 0.0 && vol.GetMute().map(|b| b.as_bool()).unwrap_or(false) {
                                 let _ = vol.SetMute(false, std::ptr::null());
                             }
+                        }
+                    }
+                    Cmd::ToggleMute => {
+                        if let Some(vol) = &endpoint {
+                            let m = vol.GetMute().map(|b| b.as_bool()).unwrap_or(false);
+                            let _ = vol.SetMute(!m, std::ptr::null());
                         }
                     }
                     Cmd::Reacquire => {

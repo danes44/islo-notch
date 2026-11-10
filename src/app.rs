@@ -16,7 +16,7 @@ use crate::platform::{self, Kind, WinWindow};
 use crate::shelf::{self, DropEvent, Entry};
 use crate::spring::Spring;
 use crate::system::{self, Battery};
-use crate::{Island, IslandTheme, NearbyItem, NoteItem, PetSkin, SettingsWindow, ShelfItem};
+use crate::{Island, IslandTheme, MediaRow, NearbyItem, NoteItem, PetSkin, SettingsWindow, ShelfItem};
 use crate::{audio, brightness, game, glass, live, lyrics, media, notify, package, pet, update};
 use slint::{ComponentHandle, ModelRc, Timer, TimerMode, VecModel};
 use std::cell::RefCell;
@@ -52,7 +52,7 @@ const GLYPH: f32 = 36.0; // one glyph slot in the side tab
 /// Island windows are a little larger than the largest shape so the shoulders
 /// and spring overshoot fit; the extra pixels are click-through.
 const WIN_W: f32 = EXPANDED_W + 60.0; // top / bottom
-const WIN_H: f32 = 330.0; // tall enough for the lyrics panel and its soft shadow
+const WIN_H: f32 = 350.0; // tall enough for the lyrics panel, the media list and the soft shadow
 const SIDE_W: f32 = EXPANDED_W + 40.0; // left / right
 const SIDE_H: f32 = 560.0;
 
@@ -197,6 +197,9 @@ struct App {
     /// Width "flash" when plugging in: briefly widen, then settle.
     flash_wide: bool,
     hidden_user: bool,
+    /// A game is in front (see update_game_focus): the islands let every
+    /// click and hover through to it and never open.
+    game_focus: bool,
     sys_anim: bool,
     /// Taskbar thickness in logical px while in taskbar mode (0 otherwise):
     /// the quiet island is exactly as tall, like a notch in the menu bar.
@@ -207,6 +210,11 @@ struct App {
     art: slint::Image,
     accent: slint::Color,
     media_tx: Option<Sender<media::Cmd>>,
+    /// The other media sessions (playing or paused), listed under the player.
+    media_list: Vec<media::Entry>,
+    media_rows: Rc<VecModel<MediaRow>>,
+    /// Thumbnails by session id: (art_id, image), so they're only uploaded when they change.
+    thumbs: Vec<(u64, u64, slint::Image)>,
     audio_tx: Option<Sender<audio::Cmd>>,
     battery: Battery,
     hud: (i32, f32, bool),
@@ -735,7 +743,7 @@ impl App {
     fn peek_ok(&self, v: &View) -> bool {
         let c = &self.cfg;
         let size = pet::SIZES[c.pet_size.clamp(0, 2) as usize];
-        c.pet && c.pet_peek && !self.reduce_motion() && self.away.is_none() && self.visitor.is_none()
+        c.pet && c.pet_peek && !self.reduce_motion() && self.away.is_none() && self.visitor.is_none() && !self.game_focus
             && v.shown && !v.dragging && !v.drag_over && !v.pressed
             && !(v.expanded && v.panel == P_PET)
             && v.h.target.max(v.h.value) + size * 0.8 <= WIN_H
@@ -778,6 +786,8 @@ impl App {
             _ => self.rand() % 2 == 0,
         };
         self.peek = Some(i);
+        // one Mochi: it leaves the pill / Pet tab while it's out (duck_peek brings it back)
+        self.views[i].island.set_pet_out(true);
         self.greet_mood();
         if walk {
             let from_left = self.rand() % 2 == 0;
@@ -1658,7 +1668,7 @@ impl App {
             P_LYRICS => 228.0,
             P_NOTIF => self.visible_notes().len().clamp(1, 3) as f32 * 64.0 + 40.0,
             P_PET => 92.0 + if self.pet_list_open { 12.0 + self.nearby().len().clamp(1, 2) as f32 * 40.0 } else { 0.0 },
-            _ if self.media_visible() => 130.0,
+            _ if self.media_visible() => 130.0 + self.media_list_h(),
             _ => 80.0,
         };
         PAD + header + content + PAD
@@ -2055,6 +2065,7 @@ impl App {
         let island = Island::new()?;
         let win = platform::native(island.window()).expect("island window");
         island.set_shelf_items(self.shelf_model.clone().into());
+        island.set_media_list(self.media_rows.clone().into());
         let (compact, open) = crate::shadow::images();
         island.set_shadow_compact(compact);
         island.set_shadow_open(open);
@@ -2239,6 +2250,12 @@ impl App {
         self.update_peek();
         self.update_pointer_watch();
         self.update_glass();
+        // (new islands, e.g. a monitor plugged in, follow the game state too)
+        for v in &self.views {
+            system::set_click_through(v.win.hwnd(), self.game_focus);
+        }
+        // Islo's volume HUD replaces Windows' flyout while the island is on screen
+        system::watch_volume_keys(platform::host_hwnd(), self.cfg.hud && self.any_shown());
     }
 
     fn check_fullscreen(&mut self) {
@@ -2250,6 +2267,39 @@ impl App {
             self.retarget();
             self.apply_visibility();
         }
+        self.update_game_focus();
+    }
+
+    /// Is a game in front? One Windows knows as a game (borderless window
+    /// included), one that has trapped the pointer, or anything full screen.
+    /// Checked on each foreground change and the few re-checks after it.
+    fn update_game_focus(&mut self) {
+        let ours: Vec<HWND> = self.views.iter().map(|v| v.win.hwnd()).collect();
+        let game = system::foreground_is_game(&ours)
+            || system::cursor_confined()
+            || self.views.iter().any(|v| system::fullscreen_on(v.monitor, &ours));
+        self.set_game_focus(game);
+    }
+
+    fn set_game_focus(&mut self, game: bool) {
+        if game == self.game_focus {
+            return;
+        }
+        self.game_focus = game;
+        for i in 0..self.views.len() {
+            system::set_click_through(self.views[i].win.hwnd(), game);
+            if game {
+                let v = &mut self.views[i];
+                v.hovering = false;
+                v.pressed = false;
+                v.press_at = None;
+                v.hover_timer.stop();
+                if v.expanded && !self.cfg.keep_open {
+                    self.collapse(i);
+                }
+            }
+        }
+        self.update_peek(); // Mochi doesn't wander over a game
     }
 
     /// A game becomes the foreground window first and switches to exclusive
@@ -2299,7 +2349,7 @@ impl App {
     /// front): its hidden cursor may wander onto the island, so hover alone
     /// mustn't open it. A click still does.
     fn pointer_held_by_game(&self, i: usize) -> bool {
-        if system::cursor_confined() {
+        if self.game_focus || system::cursor_confined() {
             return true;
         }
         let ours: Vec<HWND> = self.views.iter().map(|v| v.win.hwnd()).collect();
@@ -2504,6 +2554,9 @@ impl App {
         let carrying = self.carrying;
         let wants_open = h && hover_expand && !self.views[i].expanded && !carrying;
         let game = wants_open && self.pointer_held_by_game(i);
+        if game && !self.game_focus && system::cursor_confined() {
+            self.set_game_focus(true); // a game trapped the pointer since the last check
+        }
         let v = &mut self.views[i];
         v.hovering = h;
         if h {
@@ -2553,6 +2606,9 @@ impl App {
     }
 
     fn expand(&mut self, i: usize) {
+        if self.media.is_some() && !self.views.get(i).is_some_and(|v| v.expanded) {
+            self.media_cmd(media::Cmd::Volumes); // the mixer may have changed meanwhile
+        }
         let media_visible = self.media_live() || self.shelf.is_empty();
         let synced = self.synced_on();
         let tab = self.tab(&self.views[i]);
@@ -3281,6 +3337,9 @@ impl App {
     }
 
     fn on_click(&mut self, i: usize) {
+        if self.game_focus {
+            return; // a game is in front: the island stays out of the way
+        }
         let Some(v) = self.views.get_mut(i) else { return };
         if v.suppress_click || v.dragging {
             v.suppress_click = false;
@@ -3373,7 +3432,9 @@ impl App {
                 }
                 let (title, sub) = (info.title.clone(), subtitle(&info));
                 let (playing, timeline) = (info.playing, info.timeline.is_some());
+                let volume = info.volume.unwrap_or(-1.0);
                 self.each(|isl| {
+                    isl.set_media_volume(volume);
                     isl.set_track_title(title.clone().into());
                     isl.set_subtitle(sub.clone().into());
                     isl.set_playing(playing);
@@ -3420,6 +3481,55 @@ impl App {
         if self.playing() && !was_playing {
             self.music_started();
         }
+    }
+
+    /// The other sessions arrived: rows with a thumbnail, status and app.
+    fn on_media_list(&mut self, list: Vec<media::Entry>) {
+        let mut thumbs = Vec::with_capacity(list.len());
+        let rows: Vec<MediaRow> = list
+            .iter()
+            .map(|e| {
+                let art = match self.thumbs.iter().find(|t| t.0 == e.id && t.1 == e.art_id) {
+                    Some(t) => t.2.clone(),
+                    None => e.art.as_ref().map_or_else(slint::Image::default, |rgba| {
+                        let px = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(rgba, media::THUMB, media::THUMB);
+                        slint::Image::from_rgba8(px)
+                    }),
+                };
+                thumbs.push((e.id, e.art_id, art.clone()));
+                let status = if e.playing { "Playing" } else { "Paused" };
+                let mut sub = format!("{status} · {}", e.app);
+                if !e.artist.is_empty() {
+                    sub = format!("{sub} · {}", e.artist);
+                }
+                MediaRow {
+                    title: if e.title.is_empty() { e.artist.clone().into() } else { e.title.clone().into() },
+                    sub: sub.into(),
+                    playing: e.playing,
+                    art,
+                    has_art: e.art.is_some(),
+                    volume: e.volume.unwrap_or(-1.0),
+                }
+            })
+            .collect();
+        let resize = rows.len().min(2) != self.media_list.len().min(2) || self.media_list.is_empty() != list.is_empty();
+        self.thumbs = thumbs;
+        self.media_list = list;
+        self.media_rows.set_vec(rows);
+        if resize {
+            self.retarget();
+        }
+    }
+
+    /// Height under the player: its app's volume, then up to two rows of the
+    /// other media (the rest scroll). Must match the media panel in island.slint.
+    fn media_list_h(&self) -> f32 {
+        let volume = if self.media.as_ref().is_some_and(|m| m.info.volume.is_some()) { 30.0 } else { 0.0 };
+        volume
+            + match self.media_list.len() {
+                0 => 0.0,
+                n => 8.0 + n.min(2) as f32 * 44.0,
+            }
     }
 
     // ---------------- lyrics ----------------
@@ -4398,6 +4508,18 @@ impl App {
                 self.backdrop_changed();
                 Some(LRESULT(0))
             }
+            system::WM_APP_VOLKEY => {
+                // Windows' own step is 2 points; the HUD follows from the volume event
+                use windows::Win32::UI::Input::KeyboardAndMouse::{VK_VOLUME_DOWN, VK_VOLUME_UP};
+                if let Some(tx) = &self.audio_tx {
+                    let _ = tx.send(match wp.0 as u16 {
+                        k if k == VK_VOLUME_UP.0 => audio::Cmd::Step(2.0),
+                        k if k == VK_VOLUME_DOWN.0 => audio::Cmd::Step(-2.0),
+                        _ => audio::Cmd::ToggleMute,
+                    });
+                }
+                Some(LRESULT(0))
+            }
             WM_TIMECHANGE => {
                 self.refresh_date();
                 None
@@ -4747,6 +4869,40 @@ fn wire_island(island: &Island, i: usize) {
     island.on_prev_track(|| {
         with_app(|a| a.media_cmd(media::Cmd::Prev));
     });
+    island.on_media_open_current(|| {
+        with_app(|a| a.media_cmd(media::Cmd::OpenCurrent));
+    });
+    island.on_media_open(|k| {
+        with_app(|a| {
+            if let Some(id) = a.media_list.get(k as usize).map(|e| e.id) {
+                a.media_cmd(media::Cmd::Open(id));
+            }
+        });
+    });
+    island.on_media_set_volume(|v| {
+        with_app(|a| {
+            if let Some(m) = &mut a.media {
+                m.info.volume = Some(v);
+            }
+            a.media_cmd(media::Cmd::CurrentVolume(v));
+        });
+    });
+    island.on_media_row_volume(|k, v| {
+        with_app(|a| {
+            if let Some(e) = a.media_list.get_mut(k as usize) {
+                e.volume = Some(v);
+                let id = e.id;
+                a.media_cmd(media::Cmd::Volume(id, v));
+            }
+        });
+    });
+    island.on_media_toggle(|k| {
+        with_app(|a| {
+            if let Some(id) = a.media_list.get(k as usize).map(|e| e.id) {
+                a.media_cmd(media::Cmd::Toggle(id));
+            }
+        });
+    });
     island.on_select_panel(move |p| {
         with_app(|a| a.open_panel(i, p));
     });
@@ -4925,6 +5081,7 @@ pub fn run() -> Result<(), slint::PlatformError> {
         transient: None,
         flash_wide: false,
         hidden_user: false,
+        game_focus: false,
         sys_anim: system::system_animations_enabled(),
         taskbar_h: 0.0,
         media: None,
@@ -4932,6 +5089,9 @@ pub fn run() -> Result<(), slint::PlatformError> {
         art: slint::Image::default(),
         accent: slint::Color::from_rgb_u8(0xfc, 0x90, 0xbc),
         media_tx: None,
+        media_list: Vec::new(),
+        media_rows: Rc::new(VecModel::<MediaRow>::default()),
+        thumbs: Vec::new(),
         audio_tx: None,
         battery: system::battery(),
         hud: (0, 0.0, false),
@@ -5078,7 +5238,7 @@ pub fn run() -> Result<(), slint::PlatformError> {
         }
     });
 
-    let media_tx = media::start(|info| post(move |a| a.on_media(info)));
+    let media_tx = media::start(|info| post(move |a| a.on_media(info)), |list| post(move |a| a.on_media_list(list)));
     let audio_tx = audio::start(|v, muted, initial| {
         if !initial {
             post(move |a| {

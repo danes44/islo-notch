@@ -169,6 +169,77 @@ pub fn cursor_confined() -> bool {
     }
 }
 
+/// Is the foreground window a game? Windows keeps a list of every game it has
+/// seen (Game Bar's GameConfigStore, one key per game with the exe's path).
+/// This catches games in a borderless window too, which neither cover the
+/// screen nor confine the pointer while you're in their menus. Read once per
+/// foreground change, never polled.
+pub fn foreground_is_game(ours: &[HWND]) -> bool {
+    unsafe {
+        let fg = GetForegroundWindow();
+        if fg.is_invalid() || ours.contains(&fg) {
+            return false;
+        }
+        let exe = process_path(fg).to_lowercase();
+        if exe.is_empty() {
+            return false;
+        }
+        let mut key = HKEY::default();
+        if RegOpenKeyExW(HKEY_CURRENT_USER, w!("System\\GameConfigStore\\Children"), None, KEY_READ, &mut key) != ERROR_SUCCESS {
+            return false;
+        }
+        let mut found = false;
+        let mut name = [0u16; 128];
+        let mut k = 0;
+        loop {
+            let mut n = name.len() as u32;
+            if RegEnumKeyExW(key, k, Some(windows::core::PWSTR(name.as_mut_ptr())), &mut n, None, None, None, None) != ERROR_SUCCESS {
+                break;
+            }
+            k += 1;
+            let mut buf = [0u16; 520];
+            let mut size = (buf.len() * 2) as u32;
+            let r = RegGetValueW(key, PCWSTR(name.as_ptr()), w!("MatchedExeFullPath"), RRF_RT_REG_SZ, None, Some(buf.as_mut_ptr() as _), Some(&mut size));
+            if r == ERROR_SUCCESS {
+                let len = (size as usize / 2).saturating_sub(1).min(buf.len());
+                if String::from_utf16_lossy(&buf[..len]).to_lowercase() == exe {
+                    found = true;
+                    break;
+                }
+            }
+        }
+        let _ = RegCloseKey(key);
+        found
+    }
+}
+
+/// Full path of the exe that owns a window ("" if it can't be read).
+fn process_path(h: HWND) -> String {
+    use windows::Win32::System::Threading::*;
+    unsafe {
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(h, Some(&mut pid));
+        let Ok(p) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else { return String::new() };
+        let mut buf = [0u16; 520];
+        let mut n = buf.len() as u32;
+        let ok = QueryFullProcessImageNameW(p, PROCESS_NAME_WIN32, windows::core::PWSTR(buf.as_mut_ptr()), &mut n).is_ok();
+        let _ = CloseHandle(p);
+        if ok { String::from_utf16_lossy(&buf[..n as usize]) } else { String::new() }
+    }
+}
+
+/// Let clicks and the pointer pass straight through a window (to the game
+/// under it), or take them again.
+pub fn set_click_through(h: HWND, on: bool) {
+    unsafe {
+        let ex = GetWindowLongW(h, GWL_EXSTYLE) as u32;
+        let next = if on { ex | WS_EX_TRANSPARENT.0 } else { ex & !WS_EX_TRANSPARENT.0 };
+        if next != ex {
+            SetWindowLongW(h, GWL_EXSTYLE, next as i32);
+        }
+    }
+}
+
 // ---------------- Liquid Glass: what's behind the island ----------------
 //
 // The glass shows the screen behind it, so it must hear when that changes: a
@@ -738,6 +809,70 @@ pub fn set_native_osd_hidden(hidden: bool) -> bool {
         }
         found
     }
+}
+
+// ---------------- volume keys ----------------
+
+/// A volume key was pressed while Islo handles them (wparam: the VK code).
+pub const WM_APP_VOLKEY: u32 = WM_APP + 15;
+
+static KEYS_ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static KEY_THREAD: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+// the host window, for the hook thread (platform::host_hwnd is per thread)
+static KEY_HOST: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+
+unsafe extern "system" fn volume_key_hook(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
+    use windows::Win32::UI::Input::KeyboardAndMouse::*;
+    unsafe {
+        if code == HC_ACTION as i32 {
+            let k = &*(l.0 as *const KBDLLHOOKSTRUCT);
+            let vk = VIRTUAL_KEY(k.vkCode as u16);
+            if matches!(vk, VK_VOLUME_UP | VK_VOLUME_DOWN | VK_VOLUME_MUTE) {
+                if matches!(w.0 as u32, WM_KEYDOWN | WM_SYSKEYDOWN) {
+                    let host = HWND(KEY_HOST.load(std::sync::atomic::Ordering::Relaxed) as *mut _);
+                    let _ = PostMessageW(Some(host), WM_APP_VOLKEY, WPARAM(vk.0 as usize), LPARAM(0));
+                }
+                return LRESULT(1); // Windows never sees it, so its own flyout stays away
+            }
+        }
+        CallNextHookEx(None, code, w, l)
+    }
+}
+
+/// Newer Windows 11 builds draw the volume flyout where apps can't hide it, so
+/// while Islo's HUD is on screen Islo takes the volume keys itself: the hook
+/// only looks at the three volume keys and passes everything else straight on.
+/// It runs on its own thread (so a busy UI never delays a key) and is removed
+/// while Islo is hidden, e.g. in full-screen games, where Windows handles them.
+pub fn watch_volume_keys(host: HWND, on: bool) {
+    use std::sync::atomic::Ordering;
+    KEY_HOST.store(host.0 as isize, Ordering::Relaxed);
+    if KEYS_ON.swap(on, Ordering::SeqCst) == on {
+        return;
+    }
+    if !on {
+        let tid = KEY_THREAD.swap(0, Ordering::SeqCst);
+        if tid != 0 {
+            unsafe {
+                let _ = PostThreadMessageW(tid, WM_QUIT, WPARAM(0), LPARAM(0));
+            }
+        }
+        return;
+    }
+    let _ = std::thread::Builder::new().name("islo-keys".into()).stack_size(64 * 1024).spawn(|| unsafe {
+        let mut msg = MSG::default();
+        // make the message queue before anyone can post to it
+        let _ = PeekMessageW(&mut msg, None, 0, 0, PM_NOREMOVE);
+        KEY_THREAD.store(windows::Win32::System::Threading::GetCurrentThreadId(), Ordering::SeqCst);
+        if !KEYS_ON.load(Ordering::SeqCst) {
+            KEY_THREAD.store(0, Ordering::SeqCst);
+            return; // switched off while starting
+        }
+        let module = GetModuleHandleW(None).ok().map(|m| HINSTANCE(m.0));
+        let Ok(hook) = SetWindowsHookExW(WH_KEYBOARD_LL, Some(volume_key_hook), module, 0) else { return };
+        while GetMessageW(&mut msg, None, 0, 0).as_bool() {}
+        let _ = UnhookWindowsHookEx(hook);
+    });
 }
 
 /// Timer done chime (the system's notification sound).

@@ -174,7 +174,7 @@ impl Backdrop {
         let (hx, hy) = (cx - r, cy - r);
         let mut buf = SharedPixelBuffer::<Rgba8Pixel>::new(pw as u32, ph as u32);
         let out = buf.make_mut_slice();
-        let mut luma_sum = 0f32;
+        let (mut luma_sum, mut lit) = (0f32, 0usize);
         for j in 0..ph {
             let ly = j as f32 + 0.5;
             let py = ly - cy;
@@ -193,6 +193,14 @@ impl Backdrop {
                 };
                 nx = nx.copysign(px);
                 ny = ny.copysign(py);
+                // Outside the rounded shape the image is see-through, with a one
+                // pixel soft edge (Slint's software renderer clips children to the
+                // pill's box, not to its rounded corners).
+                let cover = (d + 0.5).clamp(0.0, 1.0);
+                if cover <= 0.0 {
+                    out[j * pw + i] = Rgba8Pixel { r: 0, g: 0, b: 0, a: 0 };
+                    continue;
+                }
                 let t = (1.0 - d.max(0.0) / band).max(0.0);
                 let e = bend * t * t * (3.0 - 2.0 * t); // smoothstep: strongest at the rim
                 let sx = x + lx - px * mag + nx * e;
@@ -200,6 +208,7 @@ impl Backdrop {
                 let [mut cr, mut cg, mut cb] = self.sample(sx, sy);
                 let l = 0.2126 * cr + 0.7152 * cg + 0.0722 * cb;
                 luma_sum += l;
+                lit += 1;
                 // the colors behind light the glass: brighter, more colorful
                 cr = (l + (cr - l) * 1.8) * 1.15;
                 cg = (l + (cg - l) * 1.8) * 1.15;
@@ -208,6 +217,18 @@ impl Backdrop {
                 cr += (tint_rgb[0] - cr) * tint_a;
                 cg += (tint_rgb[1] - cg) * tint_a;
                 cb += (tint_rgb[2] - cb) * tint_a;
+                // White ink: bright pages behind are toned down (a soft knee above
+                // 45% brightness), so white text and controls stay readable over
+                // a white page while dark areas keep their clear glass look.
+                if !dark_ink {
+                    let pl = 0.2126 * cr + 0.7152 * cg + 0.0722 * cb;
+                    if pl > 0.45 {
+                        let k = (0.45 + (pl - 0.45) * 0.3) / pl;
+                        cr *= k;
+                        cg *= k;
+                        cb *= k;
+                    }
+                }
                 // inner glow, and a rim that's brightest top-left and bottom-right
                 let mut glow = 0.35 * (-d.max(0.0) / glow_w).exp();
                 if d < rim_w {
@@ -217,10 +238,10 @@ impl Backdrop {
                 }
                 let glow = glow.min(1.0);
                 let to8 = |c: f32| ((c + (1.0 - c) * glow).clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
-                out[j * pw + i] = Rgba8Pixel { r: to8(cr), g: to8(cg), b: to8(cb), a: 255 };
+                out[j * pw + i] = Rgba8Pixel { r: to8(cr), g: to8(cg), b: to8(cb), a: (cover * 255.0 + 0.5) as u8 };
             }
         }
-        Rendered { image: Image::from_rgba8(buf), luma: luma_sum / (pw * ph) as f32 }
+        Rendered { image: Image::from_rgba8(buf), luma: luma_sum / lit.max(1) as f32 }
     }
 
     /// Bilinear sample at (x, y), clamped to the captured rectangle; 0..1 RGB.
@@ -283,5 +304,16 @@ mod tests {
         let buf = out.image.to_rgba8().expect("rgba");
         let mid = buf.as_slice()[18 * 40 + 3];
         assert!(mid.r > mid.b, "left rim should bend red in from outside: {mid:?}");
+    }
+
+    #[test]
+    fn corners_outside_the_pill_are_clear() {
+        let out = flat(300, 120, [40, 40, 40]).render(40.0, 20.0, 220.0, 36.0, 18.0, 1.0, 0xffffff, false);
+        let buf = out.image.to_rgba8().expect("rgba");
+        let px = buf.as_slice();
+        assert_eq!(px[0].a, 0, "top-left corner");
+        assert_eq!(px[219].a, 0, "top-right corner");
+        assert_eq!(px[35 * 220].a, 0, "bottom-left corner");
+        assert_eq!(px[18 * 220 + 110].a, 255, "middle");
     }
 }
