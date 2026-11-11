@@ -461,19 +461,6 @@ pub fn restore_island(hwnd: HWND) {
     raise_topmost(hwnd);
 }
 
-/// Let mouse input fall through the island to the window beneath (a game in
-/// full screen), or take it again.
-pub fn set_click_through(hwnd: HWND, on: bool) {
-    unsafe {
-        let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-        let t = WS_EX_TRANSPARENT.0 as isize;
-        let new = if on { ex | t } else { ex & !t };
-        if new != ex {
-            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new);
-        }
-    }
-}
-
 /// Put an island back above the taskbar (clicking the taskbar raises it over
 /// every other topmost window).
 pub fn raise_topmost(hwnd: HWND) {
@@ -484,7 +471,8 @@ pub fn raise_topmost(hwnd: HWND) {
 
 /// Is a taskbar window stacked above `hwnd`? The taskbar re-raises itself over
 /// other topmost windows on click, hover, or Explorer restarts, with no
-/// foreground change we could hook, so this is checked on a slow timer.
+/// foreground change we could hook, so this is checked on a slow timer (only
+/// while an island shares the taskbar's edge, see App::update_zorder_guard).
 pub fn tray_above(hwnd: HWND) -> bool {
     unsafe {
         let mut cur = hwnd;

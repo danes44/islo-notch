@@ -173,8 +173,6 @@ struct View {
     dragging: bool,
     suppress_click: bool,
     hidden_fullscreen: bool,
-    /// An app covers this display (a game): click-through and no raising, even if shown.
-    fullscreen_app: bool,
     shown: bool,
     hover_timer: Timer,
     leave_timer: Timer,
@@ -2098,7 +2096,6 @@ impl App {
             dragging: false,
             suppress_click: false,
             hidden_fullscreen: false,
-            fullscreen_app: false,
             shown: false,
             hover_timer: Timer::default(),
             leave_timer: Timer::default(),
@@ -2187,28 +2184,46 @@ impl App {
     fn resync_taskbar(&mut self) {
         let (edge, th) = (self.cfg.edge, self.taskbar_h);
         self.sync_taskbar();
+        self.zorder_guard.stop(); // the taskbar may have moved edge
+        self.update_zorder_guard();
         if self.cfg.edge != edge || self.taskbar_h != th {
             self.push_island_settings();
             self.retarget();
         }
     }
 
+    /// Back above the taskbar, never over a game.
     fn raise_islands(&self) {
-        for v in self.views.iter().filter(|v| v.shown && !v.fullscreen_app) {
+        if self.game_focus {
+            return;
+        }
+        for v in self.views.iter().filter(|v| v.shown) {
             system::raise_topmost(v.win.hwnd());
         }
     }
 
     /// Slow guard: the taskbar can climb over the island without any event we
     /// receive (click, hover, Explorer restart), so re-raise when it's above.
-    fn start_zorder_guard(&mut self) {
-        self.zorder_guard.start(TimerMode::Repeated, Duration::from_millis(500), || {
-            with_app(|a| {
-                for v in a.views.iter().filter(|v| v.shown && !v.fullscreen_app && system::island_lost(v.win.hwnd())) {
-                    system::restore_island(v.win.hwnd());
-                }
+    /// Only runs while an island shares the taskbar's edge (taskbar mode, or
+    /// the island on the taskbar's side), is on screen and no game is in front:
+    /// everywhere else the two never overlap and nothing ticks.
+    fn update_zorder_guard(&mut self) {
+        let touches = self.cfg.taskbar || system::taskbar_edge() == Some(self.cfg.edge);
+        let want = touches && self.any_shown() && !self.game_focus;
+        if !want {
+            self.zorder_guard.stop();
+        } else if !self.zorder_guard.running() {
+            self.zorder_guard.start(TimerMode::Repeated, Duration::from_millis(500), || {
+                with_app(|a| {
+                    if a.game_focus {
+                        return;
+                    }
+                    for v in a.views.iter().filter(|v| v.shown && system::island_lost(v.win.hwnd())) {
+                        system::restore_island(v.win.hwnd());
+                    }
+                });
             });
-        });
+        }
     }
 
     fn place_all(&mut self) {
@@ -2266,6 +2281,7 @@ impl App {
         self.update_peek();
         self.update_pointer_watch();
         self.update_glass();
+        self.update_zorder_guard();
         // (new islands, e.g. a monitor plugged in, follow the game state too)
         for v in &self.views {
             system::set_click_through(v.win.hwnd(), self.game_focus);
@@ -2316,6 +2332,7 @@ impl App {
             }
         }
         self.update_peek(); // Mochi doesn't wander over a game
+        self.update_zorder_guard();
     }
 
     /// A game becomes the foreground window first and switches to exclusive
@@ -2340,23 +2357,9 @@ impl App {
                 ours.push(w.hwnd());
             }
         }
-        let covered = system::fullscreen_on(self.views[i].monitor, &ours);
-        let fs = self.cfg.hide_fullscreen && covered;
+        // (click-through over games, hidden or not: see update_game_focus)
+        let fs = self.cfg.hide_fullscreen && system::fullscreen_on(self.views[i].monitor, &ours);
         let v = &mut self.views[i];
-        let mut changed = false;
-        if covered != v.fullscreen_app {
-            changed = true;
-            // Even when the island stays visible over a game, it must not catch
-            // hover or clicks meant for the game, nor fight it for the top.
-            v.fullscreen_app = covered;
-            system::set_click_through(v.win.hwnd(), covered);
-            if covered {
-                v.expanded = false;
-                v.hovering = false;
-            } else {
-                system::restore_island(v.win.hwnd());
-            }
-        }
         if fs != v.hidden_fullscreen {
             v.hidden_fullscreen = fs;
             if fs {
@@ -2373,7 +2376,7 @@ impl App {
             }
             return true;
         }
-        changed
+        false
     }
 
     /// A game has the pointer (confined mouse-look, or a full-screen app in
@@ -4444,7 +4447,7 @@ impl App {
     /// Apply the whole config to the live islands.
     fn apply_config(&mut self) {
         self.sync_taskbar();
-        self.start_zorder_guard();
+        self.update_zorder_guard();
         shelf::set_accepting(self.cfg.shelf);
         self.update_notify();
         self.update_ble();
