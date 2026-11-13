@@ -42,7 +42,7 @@ pub struct Config {
     pub side_style: i32, // 0 icon tab, 1 thin sliver, 2 full vertical pill
     pub hover_expand: bool,
     pub hover_delay: u32, // ms, 100..1000
-    pub theme: i32,       // island + settings window: 0 follow Windows, 1 light, 2 dark, 3 Liquid Glass
+    pub theme: i32,       // mode, island + settings window: 0 follow Windows, 1 light, 2 dark
     pub reduce_motion: bool,
     pub show_on: i32, // 0 main display, 1 all displays, 2 display with the pointer
     pub monitor: i32, // 0 = primary, n = n-th display (used with show_on = 0)
@@ -100,6 +100,12 @@ pub struct Config {
     pub island_style: i32, // 0 notch (joined to the edge), 1 dynamic pill (floats just off it)
     pub glass_tint: u32,   // Liquid Glass tint, 0xRRGGBB (white = clear)
     pub glass_live: bool,  // Liquid Glass bends the screen behind it (off: still glass)
+    // look (1.2)
+    pub look: i32,          // 0 Classic, 1 Liquid Glass, 2 Soft Bento
+    pub accent: i32,        // Soft Bento accent: 0 indigo, 1 rose
+    pub glass_frost: i32,   // Liquid Glass blur, 0..100 %
+    pub glass_window: bool, // Liquid Glass dresses the Settings window too
+    pub glass_saver: bool,  // battery saver switches Liquid Glass to Still
 }
 
 impl Default for Config {
@@ -162,6 +168,11 @@ impl Default for Config {
             island_style: 0,
             glass_tint: 0xffffff,
             glass_live: true,
+            look: 0,
+            accent: 0,
+            glass_frost: 40,
+            glass_window: true,
+            glass_saver: true,
         }
     }
 }
@@ -184,8 +195,15 @@ impl Config {
     }
 
     pub fn load() -> Config {
+        match std::fs::read_to_string(Self::path()) {
+            Ok(text) => Self::parse(&text),
+            Err(_) => Config::default(),
+        }
+    }
+
+    /// islo.ini's text into a config (missing or bad lines keep their defaults).
+    fn parse(text: &str) -> Config {
         let mut c = Config::default();
-        let Ok(text) = std::fs::read_to_string(Self::path()) else { return c };
         let mut has_colors = false;
         let hex = |v: &str, d: u32| u32::from_str_radix(v.trim_start_matches('#'), 16).map_or(d, |c| c & 0xff_ffff);
         for line in text.lines() {
@@ -201,7 +219,15 @@ impl Config {
                 "side_style" => c.side_style = i(0).clamp(0, 2),
                 "hover_expand" => c.hover_expand = b,
                 "hover_delay" => c.hover_delay = i(300).clamp(100, 1000) as u32,
-                "theme" => c.theme = i(0).clamp(0, 3),
+                "theme" => {
+                    // before 1.2, Liquid Glass was theme 3
+                    if i(0) == 3 {
+                        c.look = 1;
+                        c.theme = 0;
+                    } else {
+                        c.theme = i(0).clamp(0, 2);
+                    }
+                }
                 "reduce_motion" => c.reduce_motion = b,
                 "show_on" => c.show_on = i(0).clamp(0, 2),
                 "monitor" => c.monitor = i(0).max(0),
@@ -255,6 +281,11 @@ impl Config {
                 "island_style" => c.island_style = i(0).clamp(0, 1),
                 "glass_tint" => c.glass_tint = hex(v, 0xffffff),
                 "glass_live" => c.glass_live = b,
+                "look" => c.look = i(0).clamp(0, 2),
+                "accent" => c.accent = i(0).clamp(0, 1),
+                "glass_frost" => c.glass_frost = i(40).clamp(0, 100),
+                "glass_window" => c.glass_window = b,
+                "glass_saver" => c.glass_saver = b,
                 _ => {}
             }
         }
@@ -328,7 +359,7 @@ impl Config {
         );
         let text = text
             + &format!(
-                "clock={}\nkeep_open={}\nsoft_shadow={}\nmedia_rest={}\nlyric_align={}\npet_touch={}\ngames={}\ngames_online={}\ngame_level={}\ntaskbar={}\ntaskbar_al={}\ntaskbar_back_edge={}\ntaskbar_back_pos={:.3}\nart_tint={}\nisland_style={}\nglass_tint=#{:06x}\nglass_live={}\n",
+                "clock={}\nkeep_open={}\nsoft_shadow={}\nmedia_rest={}\nlyric_align={}\npet_touch={}\ngames={}\ngames_online={}\ngame_level={}\ntaskbar={}\ntaskbar_al={}\ntaskbar_back_edge={}\ntaskbar_back_pos={:.3}\nart_tint={}\nisland_style={}\nglass_tint=#{:06x}\nglass_live={}\nlook={}\naccent={}\nglass_frost={}\nglass_window={}\nglass_saver={}\n",
                 self.clock,
                 b(self.keep_open),
                 b(self.soft_shadow),
@@ -346,6 +377,11 @@ impl Config {
                 self.island_style,
                 self.glass_tint,
                 b(self.glass_live),
+                self.look,
+                self.accent,
+                self.glass_frost,
+                b(self.glass_window),
+                b(self.glass_saver),
             );
         let path = Self::path();
         let tmp = path.with_extension("ini.tmp");
@@ -378,7 +414,7 @@ mod tests {
             side_style: 2,
             hover_expand: false,
             hover_delay: 650,
-            theme: 3,
+            theme: 2,
             reduce_motion: true,
             show_on: 2,
             monitor: 1,
@@ -429,6 +465,11 @@ mod tests {
             island_style: 1,
             glass_tint: 0x1482ff,
             glass_live: false,
+            look: 2,
+            accent: 1,
+            glass_frost: 75,
+            glass_window: false,
+            glass_saver: false,
         }
     }
 
@@ -445,5 +486,14 @@ mod tests {
         let back = Config::load();
         assert_eq!(back, d);
         let _ = std::fs::remove_file(path);
+    }
+
+    /// An islo.ini from 1.1 with Liquid Glass picked (theme=3, no look=) keeps it.
+    #[test]
+    fn old_liquid_glass_theme_carries_over() {
+        let c = Config::parse("# Islo settings\nwidth=220\ntheme=3\nglass_live=1\n");
+        assert_eq!((c.look, c.theme, c.width), (1, 0, 220.0));
+        let c = Config::parse("theme=2\nlook=2\n");
+        assert_eq!((c.look, c.theme), (2, 2));
     }
 }

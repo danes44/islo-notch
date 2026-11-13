@@ -1,6 +1,8 @@
-// Islo settings app — follows Settings > Theme with the island (Liquid Glass: dark, with the tint as accent).
-// Built from the Islo design system: monochrome controls, feature color only on
-// feature glyphs, "Saved" confirmation per row, calm motion (no bounce).
+// Islo settings, laid out like macOS System Settings: a sidebar of pages with
+// colored icons and a search field, and on the right the page's settings in
+// rounded cards. It follows Settings > Theme with the island:
+// Classic (light or dark), Liquid Glass (dark, the glass tint as accent) or
+// Soft Bento (calm surfaces, cards edged in glass, an indigo or rose accent).
 
 import { Icon, LineIcon, Icons, BrandMark, Mochi } from "icons.slint";
 
@@ -11,45 +13,81 @@ export global S {
     in property <bool> glass: false;
     in property <color> accent: #ffffff;
     in property <color> on-accent: #000000;
-    out property <color> surface-100: dark ? #000000 : #f3f3f3;
-    out property <color> surface-200: dark ? #111111 : #ffffff;
-    out property <color> surface-300: dark ? #2a2a2a : #ebebeb;
-    out property <color> hairline: dark ? #1a1a1a : #e5e5e5;
-    out property <color> border: dark ? #7a7a7a : #858585;
-    out property <color> ink: dark ? #ffffff : #0a0a0a;
-    out property <color> ink-muted: dark ? #b4b4b4 : #5e5e5e;
-    out property <color> ink-faint: dark ? #949494 : #696969;
-    out property <color> primary: glass ? accent : dark ? #ffffff : #0a0a0a;
-    out property <color> on-primary: glass ? on-accent : dark ? #000000 : #ffffff;
-    out property <color> positive: dark ? #46a758 : #2e7d32;
-    out property <color> rose: dark ? #fc90bc : #b54879;
-    out property <color> orange: dark ? #f99f55 : #ab5e0c;
-    out property <color> green: dark ? #6fd087 : #0e8c41;
-    out property <color> blue: dark ? #71bfff : #037ac0;
-    out property <color> indigo: dark ? #a9b0fd : #6566c9;
+    // Soft Bento, and its accent (rose instead of indigo)
+    in property <bool> soft: false;
+    in property <bool> rose-accent: false;
+    out property <color> surface-100: glass ? #1b1d29 : soft ? (dark ? #1e2029 : #eff1f5) : dark ? #1c1c1e : #f6f6f8; // window
+    out property <color> side: glass ? #212433 : soft ? surface-100 : dark ? #242428 : #ececf0;                         // sidebar
+    out property <color> surface-200: glass ? #282b3a : soft ? (dark ? #272a35 : #ffffff) : dark ? #2a2a2d : #ffffff; // cards
+    out property <color> surface-300: glass ? #343849 : soft ? (dark ? #323644 : #eceef3) : dark ? #38383c : #ebebef; // hover
+    out property <color> hairline: glass ? #ffffff17 : soft ? (dark ? #2e3240 : #e1e4ea) : dark ? #38383c : #e8e8ec;
+    out property <color> border: glass ? #ffffff40 : soft ? (dark ? #4a5062 : #c5cad6) : dark ? #5a5a60 : #c8c8ce;
+    out property <color> ink: glass ? #ffffff : soft ? (dark ? #eef0f5 : #1d2230) : dark ? #f5f5f5 : #141414;
+    out property <color> ink-muted: glass ? #ffffffbd : soft ? (dark ? #a2a7b5 : #565c6c) : dark ? #a3a3a8 : #5a5a5e;
+    out property <color> ink-faint: glass ? #ffffff94 : soft ? (dark ? #8e94a3 : #6b7180) : dark ? #8e8e93 : #6e6e73;
+    out property <color> primary: glass ? accent
+        : soft ? (rose-accent ? (dark ? #fc90bc : #c2306f) : (dark ? #8a9dff : #4f6bed))
+        : dark ? #2563eb : #2f6fed;
+    out property <color> on-primary: glass ? on-accent : soft && dark ? #1e2029 : #ffffff;
+    out property <color> off: glass ? #ffffff38 : soft ? (dark ? #3a3e4c : #d9dde5) : dark ? #48484d : #d9d9de;      // switch off, slider track
+    out property <color> seg: glass ? #ffffff1a : soft ? (dark ? #191b22 : #eceef3) : dark ? #38383c : #e6e6eb;      // segmented control
+    out property <color> seg-on: glass ? #ffffff4d : soft ? (dark ? #3a3e4c : #ffffff) : dark ? #636369 : #ffffff;
+    out property <color> sel: glass ? #ffffff33 : soft ? surface-200 : primary;                                        // selected page
+    out property <color> sel-ink: glass || soft ? ink : #ffffff;
+    // Soft Bento's glass edge: lit at the top, a soft shade at the bottom
+    out property <color> edge-lit: dark ? #ffffff38 : #e4e8ef;
+    out property <color> edge-shade: dark ? #ffffff0d : #c4cad7;
+    out property <color> positive: dark || glass ? #46a758 : #2e7d32;
+    out property <color> rose: dark || glass ? #fc90bc : #b54879;
+    out property <color> orange: dark || glass ? #f99f55 : #ab5e0c;
+    out property <color> green: dark || glass ? #6fd087 : #0e8c41;
+    out property <color> blue: dark || glass ? #71bfff : #037ac0;
+    out property <color> indigo: dark || glass ? #a9b0fd : #6566c9;
     out property <duration> instant: reduce ? 0ms : 90ms;
     out property <duration> quick: reduce ? 0ms : 180ms;
+}
+
+// Soft Bento's glass edge around a card (fills its parent). The software
+// renderer draws only flat borders and no rounded gradients, so the edge is
+// five bands, each showing a slice of the same outline, lit to shade.
+component GlassEdge inherits Rectangle {
+    in property <length> r;
+    for i in 5 : Rectangle {
+        y: root.height * i / 5;
+        height: root.height * (i + 1) / 5 - root.height * i / 5;
+        clip: true;
+        Rectangle {
+            y: -parent.y;
+            width: root.width;
+            height: root.height;
+            border-radius: root.r;
+            border-width: 1px;
+            border-color: S.edge-lit.mix(S.edge-shade, 1 - i / 4);
+        }
+    }
 }
 
 component Toggle inherits Rectangle {
     in-out property <bool> checked;
     in property <bool> enabled: true;
     callback toggled();
-    width: 40px;
-    height: 20px;
-    border-radius: 10px;
-    border-width: 1px;
-    border-color: !enabled ? S.hairline : checked ? S.primary : S.border;
-    background: !enabled ? S.surface-300 : checked ? S.primary : S.surface-200;
-    animate background, border-color { duration: S.quick; }
-    knob := Rectangle {
-        width: ta.pressed && root.enabled ? 16px : 12px;
-        height: 12px;
-        y: 3px;
-        x: root.checked ? root.width - self.width - 4px : 3px;
-        border-radius: 6px;
-        background: !root.enabled ? S.border : root.checked ? S.on-primary : S.ink-muted;
-        animate x, width, background { duration: S.quick; easing: ease-out; }
+    width: 38px;
+    height: 22px;
+    border-radius: 11px;
+    background: root.checked ? S.primary : S.off;
+    opacity: root.enabled ? 1 : 0.45;
+    animate background { duration: S.quick; }
+    Rectangle {
+        width: ta.pressed && root.enabled ? 22px : 18px;
+        height: 18px;
+        y: 2px;
+        x: root.checked ? root.width - self.width - 2px : 2px;
+        border-radius: 9px;
+        // (clear glass makes the track white: the knob takes the ink on it)
+        background: root.checked && S.glass ? S.on-primary : #ffffff;
+        border-width: 1px;
+        border-color: #0000001a;
+        animate x, width { duration: S.quick; easing: ease-out; }
     }
     ta := TouchArea {
         enabled: root.enabled;
@@ -68,44 +106,37 @@ component Slider inherits Rectangle {
     in property <bool> enabled: true;
     callback changed(float);
     callback released();
-    width: 200px;
+    width: 180px;
     height: 20px;
+    opacity: root.enabled ? 1 : 0.45;
     property <float> pct: (value - minimum) / (maximum - minimum);
     Rectangle {
         y: 8px;
         height: 4px;
         border-radius: 2px;
-        background: S.surface-300;
+        background: S.off;
     }
     Rectangle {
         x: 0;
         y: 8px;
         height: 4px;
-        width: (root.width - 20px) * root.pct + 10px;
+        width: (root.width - 18px) * root.pct + 9px;
         border-radius: 2px;
-        background: root.enabled ? S.primary : S.border;
+        background: S.primary;
     }
     Rectangle {
-        x: (root.width - 20px) * root.pct;
-        width: 20px;
-        height: 20px;
-        border-radius: 10px;
-        background: S.surface-200;
+        x: (root.width - 18px) * root.pct;
+        y: 1px;
+        width: 18px;
+        height: 18px;
+        border-radius: 9px;
+        background: #ffffff;
         border-width: 1px;
-        border-color: S.border;
-        Rectangle {
-            width: ta.pressed ? 10px : 12px;
-            height: self.width;
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            border-radius: self.width / 2;
-            background: root.enabled ? S.primary : S.border;
-            animate width { duration: S.instant; }
-        }
+        border-color: ta.pressed ? S.primary : #00000026;
     }
     function set-from(px: length) {
         if (!root.enabled) { return; }
-        let raw = root.minimum + clamp((px - 10px) / (root.width - 20px), 0, 1) * (root.maximum - root.minimum);
+        let raw = root.minimum + clamp((px - 9px) / (root.width - 18px), 0, 1) * (root.maximum - root.minimum);
         let v = round(raw / root.step) * root.step;
         if (v != root.value) {
             root.value = v;
@@ -122,33 +153,43 @@ component Slider inherits Rectangle {
     }
 }
 
-component Segmented inherits HorizontalLayout {
+// A segmented control: a soft track with the chosen option raised on it.
+component Segmented inherits Rectangle {
     in property <[string]> options;
     in-out property <int> current;
+    in property <bool> enabled: true;
     callback selected(int);
-    spacing: 4px;
-    for opt[i] in root.options : Rectangle {
-        height: 32px;
-        width: lbl.preferred-width + 24px;
-        border-radius: 4px;
-        border-width: 1px;
-        border-color: root.current == i ? S.primary : S.border;
-        background: root.current == i ? S.primary : seg-ta.has-hover ? S.surface-300 : S.surface-200;
-        animate background { duration: S.instant; }
-        lbl := Text {
-            text: opt;
-            font-size: 13px;
-            font-weight: 600;
-            color: root.current == i ? S.on-primary : S.ink;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-            width: parent.width;
-            height: parent.height;
-        }
-        seg-ta := TouchArea {
-            clicked => {
-                root.current = i;
-                root.selected(i);
+    width: lay.preferred-width;
+    height: 28px;
+    border-radius: 8px;
+    background: S.seg;
+    opacity: root.enabled ? 1 : 0.45;
+    lay := HorizontalLayout {
+        padding: 2px;
+        spacing: 2px;
+        for opt[i] in root.options : Rectangle {
+            width: lbl.preferred-width + 22px;
+            border-radius: 6px;
+            background: root.current == i ? S.seg-on : seg-ta.has-hover && root.enabled ? S.seg-on.with-alpha(0.45) : transparent;
+            border-width: root.current == i && S.soft && !S.dark ? 1px : 0px;
+            border-color: S.hairline;
+            animate background { duration: S.instant; }
+            lbl := Text {
+                text: opt;
+                font-size: 12px;
+                font-weight: root.current == i ? 600 : 400;
+                color: root.current == i ? S.ink : S.ink-muted;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                width: parent.width;
+                height: parent.height;
+            }
+            seg-ta := TouchArea {
+                enabled: root.enabled;
+                clicked => {
+                    root.current = i;
+                    root.selected(i);
+                }
             }
         }
     }
@@ -159,18 +200,22 @@ component Button inherits Rectangle {
     in property <bool> primary: false;
     in property <bool> enabled: true;
     callback clicked();
-    height: 32px;
+    height: 28px;
     width: lbl.preferred-width + 24px;
-    border-radius: 4px;
-    border-width: primary && enabled ? 0px : 1px;
-    border-color: enabled ? S.border : S.hairline;
-    background: !enabled ? S.surface-300 : primary ? (ta.pressed ? S.ink-muted : S.primary) : ta.has-hover ? S.surface-300 : S.surface-200;
+    border-radius: 7px;
+    // a disabled primary button drops its fill and looks like the other buttons,
+    // so a faded blue never reads as "press me"
+    property <bool> filled: root.primary && root.enabled;
+    border-width: root.filled ? 0px : 1px;
+    border-color: S.border;
+    background: root.filled ? (ta.pressed ? S.primary.darker(0.15) : S.primary) : ta.pressed && root.enabled ? S.seg : ta.has-hover && root.enabled ? S.surface-300 : S.surface-200;
+    opacity: root.enabled ? 1 : 0.45;
     animate background { duration: S.instant; }
     lbl := Text {
         text: root.text;
-        font-size: 14px;
+        font-size: 13px;
         font-weight: 600;
-        color: !root.enabled ? S.ink-faint : root.primary ? S.on-primary : S.ink;
+        color: root.filled ? S.on-primary : S.ink;
         horizontal-alignment: center;
         vertical-alignment: center;
         width: parent.width;
@@ -186,8 +231,8 @@ component TextField inherits Rectangle {
     in-out property <string> text;
     callback edited();
     width: 200px;
-    height: 32px;
-    border-radius: 4px;
+    height: 28px;
+    border-radius: 7px;
     border-width: 1px;
     border-color: ti.has-focus ? S.primary : S.border;
     background: S.surface-200;
@@ -197,7 +242,7 @@ component TextField inherits Rectangle {
         height: parent.height;
         text <=> root.text;
         color: S.ink;
-        font-size: 14px;
+        font-size: 13px;
         vertical-alignment: center;
         single-line: true;
         edited => { root.edited(); }
@@ -226,7 +271,7 @@ component SkinPicker inherits HorizontalLayout {
     for skin[i] in root.skins : Rectangle {
         width: 36px;
         height: 36px;
-        border-radius: 8px;
+        border-radius: 9px;
         border-width: root.current == i ? 2px : 1px;
         border-color: root.current == i ? S.primary : S.border;
         // mid grey so both the black and the white heads read
@@ -257,23 +302,23 @@ component ColorPicker inherits HorizontalLayout {
     in property <bool> custom-active; // `current` isn't one of `colors`
     callback picked(color);
     callback custom();
-    spacing: 8px;
+    spacing: 6px;
     alignment: end;
     for c in root.colors : Rectangle {
-        width: 32px;
-        height: 32px;
+        width: 30px;
+        height: 30px;
         Rectangle {
             visible: root.current == c && !root.custom-active;
-            border-radius: 16px;
+            border-radius: 15px;
             border-width: 2px;
             border-color: S.primary;
         }
         Rectangle {
             x: 5px;
             y: 5px;
-            width: 22px;
-            height: 22px;
-            border-radius: 11px;
+            width: 20px;
+            height: 20px;
+            border-radius: 10px;
             background: c;
             border-width: 1px;
             border-color: dot-ta.has-hover ? S.ink : S.border;
@@ -283,34 +328,39 @@ component ColorPicker inherits HorizontalLayout {
         }
     }
     if root.custom-active : Rectangle {
-        width: 32px;
-        height: 32px;
-        border-radius: 16px;
+        width: 30px;
+        height: 30px;
+        border-radius: 15px;
         border-width: 2px;
         border-color: S.primary;
         Rectangle {
             x: 5px;
             y: 5px;
-            width: 22px;
-            height: 22px;
-            border-radius: 11px;
+            width: 20px;
+            height: 20px;
+            border-radius: 10px;
             background: root.current;
             border-width: 1px;
             border-color: S.border;
         }
     }
-    Button {
-        text: "Custom…";
-        clicked => { root.custom(); }
+    VerticalLayout {
+        alignment: center;
+        Button {
+            text: "Custom…";
+            clicked => { root.custom(); }
+        }
     }
 }
 
 component Badge inherits Rectangle {
     in property <string> text: "New";
     height: 20px;
-    width: lbl.preferred-width + 16px;
-    border-radius: 10px;
-    background: S.surface-300;
+    width: lbl.preferred-width + 14px;
+    border-radius: 6px;
+    background: S.seg;
+    border-width: 1px;
+    border-color: S.hairline;
     lbl := Text {
         text: root.text;
         font-size: 11px;
@@ -323,41 +373,39 @@ component Badge inherits Rectangle {
     }
 }
 
-// A settings row: name + description on the left, a control on the right,
-// and a short "Saved" confirmation after a change.
+// A settings row: name and description on the left, a control on the right,
+// and a short "Saved" after a change. Rows in a card are split by a hairline.
 component Row inherits Rectangle {
     in property <string> name;
     in property <string> desc;
     in property <bool> first: false;
     in property <bool> saved: false;
     in property <bool> new-badge: false;
-    in property <color> glyph-color: transparent;
-    in property <string> glyph: "";
-    // Wrapped descriptions don't grow the row by themselves, so long ones ask for more room.
-    in property <length> min-h: 56px;
-    min-height: root.min-h;
-    background: ta.has-hover ? S.surface-300 : transparent;
-    animate background { duration: S.instant; }
-    ta := TouchArea { }
+    // Slint doesn't grow a row for wrapped text, so the row works out how many
+    // lines its description takes at the current width (Segoe 12 px averages
+    // about 5.4 px a character; 5.6 leaves a little slack) and asks for that:
+    // rows with the same amount of text come out the same height. A taller
+    // control still gets its room (the layout's own minimum); `min-h` can ask
+    // for more.
+    in property <length> min-h: 0px;
+    property <int> desc-lines: root.desc == "" ? 0 : max(1, ceil(root.desc.character-count * 5.6px / max(1px, col.width)));
+    property <length> want: max(root.min-h, row.min-height, 24px + 18px + (root.desc-lines > 0 ? 2px + root.desc-lines * 16px : 10px));
+    min-height: root.want;
+    preferred-height: root.want;
     if !root.first : Rectangle {
+        x: 16px;
         y: 0;
+        width: parent.width - 32px;
         height: 1px;
         background: S.hairline;
     }
-    HorizontalLayout {
+    row := HorizontalLayout {
         padding-left: 16px;
         padding-right: 16px;
         padding-top: 12px;
         padding-bottom: 12px;
         spacing: 16px;
-        if root.glyph != "" : Icon {
-            d: root.glyph;
-            fill: root.glyph-color;
-            width: 20px;
-            height: 20px;
-            y: (parent.height - self.height) / 2;
-        }
-        VerticalLayout {
+        col := VerticalLayout {
             alignment: center;
             spacing: 2px;
             horizontal-stretch: 1;
@@ -365,7 +413,7 @@ component Row inherits Rectangle {
                 spacing: 8px;
                 Text {
                     text: root.name;
-                    font-size: 14px;
+                    font-size: 13px;
                     font-weight: 600;
                     color: S.ink;
                     vertical-alignment: center;
@@ -388,87 +436,263 @@ component Row inherits Rectangle {
             opacity: root.saved ? 1 : 0;
             animate opacity { duration: S.quick; }
         }
-        @children
+        VerticalLayout {
+            // only as wide as the control: a row without one gives the text the room
+            horizontal-stretch: 0;
+            alignment: center;
+            @children
+        }
     }
 }
 
+// A rounded card of rows (Soft Bento: edged in glass instead of a hairline).
 component Card inherits Rectangle {
     background: S.surface-200;
-    border-width: 1px;
+    border-radius: S.soft ? 16px : 12px;
+    border-width: S.soft ? 0px : 1px;
     border-color: S.hairline;
-    border-radius: 8px;
-    clip: true;
     VerticalLayout {
         @children
     }
+    if S.soft : GlassEdge { r: 16px; }
 }
 
-component SectionTitle inherits Text {
-    font-size: 16px;
+component GroupTitle inherits Text {
+    font-size: 12px;
     font-weight: 600;
-    color: S.ink;
+    color: S.ink-muted;
 }
 
+struct NavEntry {
+    label: string,
+    icon: string,
+    hue: color,
+    gap: bool, // a little space above (a new group of pages)
+}
+
+// A page in the sidebar: a colored icon square and its name.
 component NavItem inherits Rectangle {
-    in property <string> text;
+    in property <NavEntry> entry;
     in property <bool> active;
     callback clicked();
-    height: 36px;
-    border-radius: 4px;
-    background: active ? S.surface-300 : ta.has-hover ? S.surface-300.with-alpha(0.5) : transparent;
+    height: 32px;
+    border-radius: 8px;
+    background: root.active ? S.sel : ta.has-hover ? S.surface-300.with-alpha(0.6) : transparent;
+    border-width: root.active && S.soft ? 1px : 0px;
+    border-color: S.hairline;
     animate background { duration: S.instant; }
-    // Windows 11 style selection pill
-    Rectangle {
-        visible: root.active;
-        x: 0;
-        y: (parent.height - self.height) / 2;
-        width: 3px;
-        height: 16px;
-        border-radius: 1.5px;
-        background: S.primary;
-    }
-    Text {
-        x: 14px;
-        text: root.text;
-        font-size: 14px;
-        font-weight: root.active ? 600 : 400;
-        color: S.ink;
-        vertical-alignment: center;
-        height: parent.height;
+    HorizontalLayout {
+        padding-left: 6px;
+        padding-right: 8px;
+        spacing: 10px;
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 22px;
+                height: 22px;
+                border-radius: 6px;
+                background: S.glass ? #ffffff2e : root.entry.hue;
+                LineIcon {
+                    x: 4px;
+                    y: 4px;
+                    width: 14px;
+                    height: 14px;
+                    d: root.entry.icon;
+                    ink: #ffffff;
+                    weight: 2.2px;
+                }
+            }
+        }
+        Text {
+            text: root.entry.label;
+            font-size: 13px;
+            font-weight: root.active ? 600 : 400;
+            color: root.active ? S.sel-ink : S.ink;
+            vertical-alignment: center;
+            overflow: elide;
+        }
     }
     ta := TouchArea {
         clicked => { root.clicked(); }
     }
 }
 
+// Settings > Appearance > Theme: a small picture of each theme, in the current mode.
+component ThemeTile inherits VerticalLayout {
+    in property <int> kind; // 0 Classic, 1 Liquid Glass, 2 Soft Bento
+    in property <string> name;
+    in property <bool> selected;
+    callback clicked();
+    spacing: 9px;
+    width: 112px;
+    property <bool> dk: S.dark;
+    Rectangle {
+        height: 70px;
+        // the picture fills the column, so its left edge lines up with the text
+        // under it; the selection ring sits just outside (see below)
+        Rectangle {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: parent.height;
+            border-radius: 8px;
+            background: root.kind == 1 ? #2a2f5a : root.kind == 2 ? (root.dk ? #1e2029 : #eff1f5) : (root.dk ? #1c1c1e : #f6f6f8);
+            border-width: 1px;
+            border-color: root.dk || root.kind == 1 ? #ffffff1f : #0000001f;
+            // Liquid Glass: a colorful wallpaper under frosted panes
+            if root.kind == 1 : Rectangle {
+                x: 6px;
+                y: 6px;
+                width: 30px;
+                height: 30px;
+                border-radius: 15px;
+                background: #ff9f55;
+            }
+            if root.kind == 1 : Rectangle {
+                x: parent.width - 40px;
+                y: 10px;
+                width: 32px;
+                height: 32px;
+                border-radius: 16px;
+                background: #4f7cff;
+            }
+            if root.kind == 1 : Rectangle {
+                x: 38px;
+                y: parent.height - 30px;
+                width: 26px;
+                height: 26px;
+                border-radius: 13px;
+                background: #1fb89a;
+            }
+            // the sidebar
+            Rectangle {
+                x: 1px;
+                y: 1px;
+                width: 26px;
+                height: parent.height - 2px;
+                border-radius: 7px;
+                background: root.kind == 1 ? #ffffff24 : root.kind == 2 ? transparent : (root.dk ? #242428 : #ececf0);
+            }
+            // the island
+            Rectangle {
+                x: 46px;
+                y: 7px;
+                width: 40px;
+                height: 10px;
+                border-radius: 5px;
+                background: root.kind == 1 ? #ffffff59 : root.kind == 2 ? (root.dk ? #272a35 : #ffffff) : (root.dk ? #000000 : #ffffff);
+                border-width: root.kind == 0 && !root.dk ? 1px : 0px;
+                border-color: #0000001f;
+                if root.kind == 2 : GlassEdge { r: 5px; }
+            }
+            // a card, or two tiles
+            Rectangle {
+                x: 34px;
+                y: 24px;
+                width: root.kind == 2 ? 30px : 64px;
+                height: parent.height - 32px;
+                border-radius: root.kind == 2 ? 6px : 5px;
+                background: root.kind == 1 ? #ffffff29 : root.kind == 2 ? (root.dk ? #272a35 : #ffffff) : (root.dk ? #2a2a2d : #ffffff);
+                border-width: root.kind == 0 && !root.dk ? 1px : 0px;
+                border-color: #e8e8ec;
+                if root.kind == 2 : GlassEdge { r: 6px; }
+            }
+            if root.kind == 2 : Rectangle {
+                x: 68px;
+                y: 24px;
+                width: 30px;
+                height: parent.height - 32px;
+                border-radius: 6px;
+                background: root.dk ? #272a35 : #ffffff;
+                GlassEdge { r: 6px; }
+                // the solid play button
+                Rectangle {
+                    x: (parent.width - 12px) / 2;
+                    y: (parent.height - 12px) / 2;
+                    width: 12px;
+                    height: 12px;
+                    border-radius: 6px;
+                    background: root.dk ? #eef0f5 : #1d2230;
+                }
+            }
+            // the player tile: indigo art and a progress bar
+            if root.kind == 2 : Rectangle {
+                x: 39px;
+                y: 29px;
+                width: 14px;
+                height: 14px;
+                border-radius: 4px;
+                background: root.dk ? #8a9dff : #4f6bed;
+            }
+            if root.kind == 2 : Rectangle {
+                x: 39px;
+                y: parent.height - 16px;
+                width: 20px;
+                height: 3px;
+                border-radius: 1.5px;
+                background: root.dk ? #8a9dff : #4f6bed;
+            }
+        }
+        // the selection ring, 3 px outside the picture
+        if root.selected : Rectangle {
+            x: -3px;
+            y: -3px;
+            width: parent.width + 6px;
+            height: parent.height + 6px;
+            border-radius: 11px;
+            border-width: 2px;
+            border-color: S.primary;
+        }
+        ta := TouchArea {
+            clicked => { root.clicked(); }
+        }
+    }
+    Text {
+        text: root.name;
+        font-size: 12px;
+        font-weight: root.selected ? 600 : 400;
+        color: root.selected ? S.ink : S.ink-muted;
+        horizontal-alignment: center;
+    }
+}
+
 export component SettingsWindow inherits Window {
     title: "Islo Settings";
-    preferred-width: 1000px;
+    preferred-width: 1020px;
     preferred-height: 720px;
-    min-width: 760px;
-    min-height: 480px;
+    min-width: 820px;
+    min-height: 520px;
     default-font-family: "Segoe UI Variable Text";
     background: S.surface-100;
 
     in property <bool> dark: true;
     in property <bool> reduce-ui: false;
     in property <bool> glass-ui: false;
+    in property <bool> soft-ui: false;
     in property <color> accent: #ffffff;
     in property <color> on-accent: #000000;
     changed dark => { S.dark = root.dark; }
     changed reduce-ui => { S.reduce = root.reduce-ui; }
     changed glass-ui => { S.glass = root.glass-ui; }
+    changed soft-ui => { S.soft = root.soft-ui; }
     changed accent => { S.accent = root.accent; }
     changed on-accent => { S.on-accent = root.on-accent; }
+    changed accent-pick => { S.rose-accent = root.accent-pick == 1; }
     init => {
         S.dark = root.dark;
         S.reduce = root.reduce-ui;
         S.glass = root.glass-ui;
+        S.soft = root.soft-ui;
         S.accent = root.accent;
         S.on-accent = root.on-accent;
+        S.rose-accent = root.accent-pick == 1;
     }
 
-    in-out property <int> page: 1; // 0 General, 1 Appearance, 2 Modules, 3 Shortcuts, 4 About
+    // 0 General, 1 Appearance, 2 Island, 3 At a glance, 4 Media & lyrics,
+    // 5 Live activity, 6 Mochi, 7 Games, 8 Full screen & power, 9 Shortcuts, 10 About
+    in-out property <int> page: 1;
+    // which pages match the search (Rust looks through each page's settings)
+    in property <[bool]> nav-hit: [true, true, true, true, true, true, true, true, true, true, true];
     in property <string> saved-key: "";
     // Changes wait in the window until Save (Islo writes islo.ini and reads it back).
     in property <bool> dirty: false;
@@ -483,11 +707,16 @@ export component SettingsWindow inherits Window {
     in-out property <int> side-style: 0;
     in-out property <bool> hover-expand: true;
     in-out property <float> hover-delay: 300;
-    in-out property <int> theme: 0;      // 0 Windows, 1 light, 2 dark, 3 Liquid Glass (island and this window)
+    in-out property <int> look: 0;         // theme: 0 Classic, 1 Liquid Glass, 2 Soft Bento
+    in-out property <int> theme: 0;        // mode: 0 Auto (Windows), 1 light, 2 dark
+    in-out property <int> accent-pick: 0;  // Soft Bento: 0 indigo, 1 rose
     in-out property <int> island-style: 0; // 0 notch, 1 dynamic pill
     in-out property <color> glass-tint: #ffffff;
     in property <bool> glass-tint-custom: false;
     in-out property <bool> glass-live: true;
+    in-out property <float> glass-frost: 40;
+    in-out property <bool> glass-window: true;
+    in-out property <bool> glass-saver: true;
     in-out property <bool> reduce-motion: false;
     in property <bool> system-reduce-motion: false;
     in-out property <int> show-on: 0;
@@ -551,6 +780,7 @@ export component SettingsWindow inherits Window {
     in property <bool> has-live: false; // timer / mic / focus indicators
 
     callback changed(string);
+    callback search(string);
     callback save-changes();
     callback discard-changes();
     callback reset-position();
@@ -564,821 +794,1038 @@ export component SettingsWindow inherits Window {
     callback set-pet-color(int, color); // 0 body, 1 eyes, 2 glass tint
     callback pick-pet-color(int);       // Windows' color picker for body (0), eyes (1) or glass tint (2)
 
+    property <[NavEntry]> nav: [
+        { label: "General", hue: #8e8e93, icon: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" },
+        { label: "Appearance", hue: #3a3a40, icon: "M12 3a9 9 0 1 0 0 18V3zM12 3a9 9 0 0 1 0 18" },
+        { label: "Island", hue: #5b74f0, icon: "M4 8h16a3 3 0 0 1 0 6H4a3 3 0 0 1 0-6z" },
+        { label: "At a glance", hue: #ff9f0a, icon: "M12 7v5l3 2M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z" },
+        { label: "Media & lyrics", hue: #fc5c8c, icon: "M9 18V5l11-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM20 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0z" },
+        { label: "Live activity", hue: #30b45a, gap: true, icon: "M22 12h-4l-3 8L9 4l-3 8H2" },
+        { label: "Mochi", hue: #c79a2a, icon: "M5 9l2.5-5L11 8h2l3.5-4L19 9v4a7 7 0 0 1-14 0V9z" },
+        { label: "Games", hue: #7a5af5, icon: "M6 12h4M8 10v4M15 11h.01M18 13h.01M7 6h10a5 5 0 0 1 5 5v2a5 5 0 0 1-9 3h-2a5 5 0 0 1-9-3v-2a5 5 0 0 1 5-5z" },
+        { label: "Full screen & power", hue: #0a84ff, icon: "M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3" },
+        { label: "Shortcuts", hue: #636366, gap: true, icon: "M4 6h16v12H4zM8 10h.01M12 10h.01M16 10h.01M8 14h8" },
+        { label: "About", hue: #8e8e93, icon: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 16v-4M12 8h.01" },
+    ];
+
     HorizontalLayout {
         // ---------- sidebar ----------
-        VerticalLayout {
-            width: 240px;
-            padding: 16px;
-            padding-top: 20px;
-            spacing: 4px;
-            HorizontalLayout {
-                padding-left: 6px;
-                padding-bottom: 16px;
-                spacing: 10px;
-                BrandMark {
-                    width: 36px;
-                    height: 36px;
-                    on-dark: S.dark;
-                }
-                VerticalLayout {
-                    Text {
-                        text: "Islo";
-                        font-size: 15px;
-                        font-weight: 600;
-                        color: S.ink;
-                    }
-                    Text {
-                        text: "Settings";
-                        font-size: 12px;
-                        color: S.ink-muted;
-                    }
-                }
+        Rectangle {
+            width: 248px;
+            background: S.side;
+            if !S.soft : Rectangle {
+                x: parent.width - 1px;
+                width: 1px;
+                background: S.hairline;
             }
-            NavItem { text: "General"; active: root.page == 0; clicked => { root.page = 0; } }
-            NavItem { text: "Appearance"; active: root.page == 1; clicked => { root.page = 1; } }
-            NavItem { text: "Modules"; active: root.page == 2; clicked => { root.page = 2; } }
-            NavItem { text: "Shortcuts"; active: root.page == 3; clicked => { root.page = 3; } }
-            NavItem { text: "About"; active: root.page == 4; clicked => { root.page = 4; } }
-            Rectangle { vertical-stretch: 1; }
+            VerticalLayout {
+                padding: 12px;
+                padding-top: 26px; // the page's top margin too: the name lines up with the title
+                spacing: 2px;
+                HorizontalLayout {
+                    padding-left: 6px;
+                    padding-bottom: 12px;
+                    spacing: 10px;
+                    BrandMark {
+                        width: 36px;
+                        height: 36px;
+                        on-dark: S.dark;
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        Text {
+                            text: "Islo";
+                            font-size: 15px;
+                            font-weight: 600;
+                            color: S.ink;
+                        }
+                        Text {
+                            text: "Version " + root.version;
+                            font-size: 12px;
+                            color: S.ink-muted;
+                        }
+                    }
+                }
+                // search: hides the pages that have nothing matching
+                HorizontalLayout {
+                    padding-bottom: 10px;
+                    Rectangle {
+                        height: 30px;
+                        border-radius: 8px;
+                        background: S.soft || S.glass ? S.surface-200 : S.dark ? #2e2e33 : #e3e3e8;
+                        border-width: S.soft ? 1px : 0px;
+                        border-color: S.hairline;
+                        LineIcon {
+                            x: 9px;
+                            y: 8px;
+                            width: 14px;
+                            height: 14px;
+                            d: "M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4.2-4.2";
+                            ink: S.ink-faint;
+                            weight: 2px;
+                        }
+                        if search-in.text == "" : Text {
+                            x: 30px;
+                            height: parent.height;
+                            text: "Search";
+                            font-size: 13px;
+                            color: S.ink-faint;
+                            vertical-alignment: center;
+                        }
+                        search-in := TextInput {
+                            x: 30px;
+                            width: parent.width - 38px;
+                            height: parent.height;
+                            font-size: 13px;
+                            color: S.ink;
+                            vertical-alignment: center;
+                            single-line: true;
+                            edited => { root.search(self.text); }
+                        }
+                    }
+                }
+                for n[i] in root.nav : VerticalLayout {
+                    property <bool> show: root.nav-hit[i] && (i != 6 || root.has-pet);
+                    padding-top: self.show && n.gap ? 16px : 0px;
+                    if self.show : NavItem {
+                        entry: n;
+                        active: root.page == i;
+                        clicked => { root.page = i; }
+                    }
+                }
+                Rectangle { vertical-stretch: 1; }
+            }
         }
 
         // ---------- page + save bar ----------
         VerticalLayout {
-        horizontal-stretch: 1;
-        Flickable {
-            vertical-stretch: 1;
-            content-height: pagebody.preferred-height;
-            pagebody := VerticalLayout {
+            horizontal-stretch: 1;
+            pagebox := Rectangle {
+              vertical-stretch: 1;
+              // how far the page can scroll; above 0 the scrollbar shows
+              property <length> over: page.content-height - page.height;
+              page := Flickable {
                 width: parent.width;
-                padding: 32px;
-                padding-top: 28px;
-                spacing: 24px;
-                alignment: start;
+                height: parent.height;
+                content-height: pagebody.preferred-height;
+                pagebody := VerticalLayout {
+                    width: parent.width;
+                    padding-left: 32px;
+                    // cards stop at 720 px wide; the save bar's buttons follow (below)
+                    padding-right: max(32px, self.width - 32px - 720px);
+                    padding-top: 26px;
+                    padding-bottom: 32px;
+                    spacing: 10px;
+                    alignment: start;
 
-                Text {
-                    text: root.page == 0 ? "General" : root.page == 1 ? "Appearance" : root.page == 2 ? "Modules" : root.page == 3 ? "Shortcuts" : "About";
-                    font-size: 28px;
-                    font-weight: 600;
-                    color: S.ink;
-                }
-
-                // ======== General ========
-                if root.page == 0 : VerticalLayout {
-                    spacing: 12px;
-                    Card {
-                        Row {
-                            first: true;
-                            name: "Start with Windows";
-                            desc: "Islo opens quietly when you sign in.";
-                            saved: root.saved-key == "autostart";
-                            Toggle { y: 18px; checked <=> root.autostart; toggled => { root.changed("autostart"); } }
-                        }
-                        Row {
-                            name: "Open settings";
-                            desc: "Right-click the island, or use the Islo icon in the system tray.";
-                        }
-                        Row {
-                            name: "Quit Islo";
-                            desc: "The island goes away until you start Islo again.";
-                            Button { y: 12px; text: "Quit"; clicked => { root.quit-app(); } }
-                        }
+                    Text {
+                        text: root.nav[root.page].label;
+                        font-size: 22px;
+                        font-weight: 600;
+                        color: S.ink;
                     }
-                }
+                    Rectangle { height: 4px; }
 
-                // ======== Appearance ========
-                if root.page == 1 : VerticalLayout {
-                    spacing: 12px;
-                    SectionTitle { text: "Island"; }
-                    Card {
-                        Row {
-                            first: true;
-                            name: "Island width";
-                            desc: "How wide the small island is. Press Save to resize it.";
-                            saved: root.saved-key == "width";
-                            HorizontalLayout {
-                                spacing: 12px;
-                                Slider {
-                                    y: 18px;
-                                    minimum: 160;
-                                    maximum: 300;
-                                    step: 10;
-                                    value <=> root.width-px;
-                                    changed => { root.changed("width"); }
-                                }
-                                Text {
-                                    width: 52px;
-                                    text: round(root.width-px) + " px";
-                                    font-size: 13px;
-                                    color: S.ink-muted;
-                                    vertical-alignment: center;
-                                    horizontal-alignment: right;
-                                }
+                    // ======== General ========
+                    if root.page == 0 : VerticalLayout {
+                        spacing: 8px;
+                        GroupTitle { text: "Startup"; }
+                        Card {
+                            Row {
+                                first: true;
+                                name: "Start with Windows";
+                                desc: "Islo opens quietly when you sign in.";
+                                saved: root.saved-key == "autostart";
+                                Toggle { checked <=> root.autostart; toggled => { root.changed("autostart"); } }
+                            }
+                            Row {
+                                name: "Check for updates automatically";
+                                desc: "Look for a new version when Islo starts and once a day. Nothing installs until you choose to.";
+                                saved: root.saved-key == "update_check";
+                                Toggle { checked <=> root.update-check; toggled => { root.changed("update_check"); } }
+                            }
+                            Row {
+                                name: "Open settings";
+                                desc: "Right-click the island, or use the Islo icon in the system tray.";
                             }
                         }
-                        Row {
-                            name: "Edge";
-                            min-h: 78px;
-                            desc: "Drag the island to any edge of the screen, or pick one here. On the left and right it turns vertical.";
-                            saved: root.saved-key == "edge";
-                            HorizontalLayout {
-                                spacing: 8px;
+                        Rectangle { height: 4px; }
+                        GroupTitle { text: "Islo"; }
+                        Card {
+                            Row {
+                                first: true;
+                                name: "Restore default settings";
+                                desc: "Puts every setting back the way Islo shipped.";
+                                Button { text: "Restore defaults"; clicked => { root.restore-defaults(); } }
+                            }
+                            Row {
+                                name: "Quit Islo";
+                                desc: "The island goes away until you start Islo again.";
+                                Button { text: "Quit"; clicked => { root.quit-app(); } }
+                            }
+                        }
+                    }
+
+                    // ======== Appearance ========
+                    if root.page == 1 : VerticalLayout {
+                        spacing: 8px;
+                        GroupTitle { text: "Theme"; }
+                        Card {
+                            VerticalLayout {
+                                padding: 16px;
+                                spacing: 12px;
+                                HorizontalLayout {
+                                    spacing: 18px;
+                                    alignment: start;
+                                    ThemeTile {
+                                        kind: 0;
+                                        name: "Classic";
+                                        selected: root.look == 0;
+                                        clicked => { root.look = 0; root.changed("look"); }
+                                    }
+                                    ThemeTile {
+                                        kind: 1;
+                                        name: "Liquid Glass";
+                                        selected: root.look == 1;
+                                        clicked => { root.look = 1; root.changed("look"); }
+                                    }
+                                    ThemeTile {
+                                        kind: 2;
+                                        name: "Soft Bento";
+                                        selected: root.look == 2;
+                                        clicked => { root.look = 2; root.changed("look"); }
+                                    }
+                                }
+                                Text {
+                                    text: root.look == 1 ? "The island bends and tints what’s behind it."
+                                        : root.look == 2 ? "Rounded tiles on one calm surface, each edged in glass."
+                                        : "Islo’s own look: a black or white island that can join the screen edge as a notch.";
+                                    font-size: 12px;
+                                    color: S.ink-muted;
+                                    wrap: word-wrap;
+                                }
+                            }
+                            Row {
+                                name: "Mode";
+                                desc: root.look == 1 && root.glass-window ? "Liquid Glass picks its own light from what’s behind it." : "Auto follows Windows’ light or dark mode. Sets the island and this window.";
+                                saved: root.saved-key == "theme";
                                 Segmented {
-                                    y: 12px;
-                                    options: ["Top", "Bottom", "Left", "Right"];
-                                    current <=> root.edge;
-                                    selected => { root.changed("edge"); }
-                                }
-                                Button { y: 12px; text: "Reset position"; clicked => { root.reset-position(); } }
-                            }
-                        }
-                        Row {
-                            name: "Inside the taskbar";
-                            min-h: 78px;
-                            new-badge: true;
-                            desc: "The island sits in the middle of the taskbar and your taskbar apps move to the left. Turn it off, drag the island to another edge or quit Islo, and they go back.";
-                            saved: root.saved-key == "taskbar";
-                            Toggle { y: 18px; checked <=> root.taskbar; toggled => { root.changed("taskbar"); } }
-                        }
-                        Row {
-                            name: "On the left or right edge";
-                            min-h: 78px;
-                            desc: "The island shrinks to show only what's live. Hover a glyph to open that feature.";
-                            saved: root.saved-key == "side";
-                            Segmented {
-                                y: 12px;
-                                options: ["Icon tab", "Thin sliver", "Full vertical pill"];
-                                current <=> root.side-style;
-                                selected => { root.changed("side"); }
-                            }
-                        }
-                        Row {
-                            name: "Expand on hover";
-                            desc: "The island opens when your pointer rests on it. Off: click to open.";
-                            saved: root.saved-key == "hover";
-                            Toggle { y: 18px; checked <=> root.hover-expand; toggled => { root.changed("hover"); } }
-                        }
-                        Row {
-                            name: "Hover delay";
-                            desc: root.hover-expand ? "How long your pointer rests before the island opens." : "Turn on Expand on hover to change this.";
-                            saved: root.saved-key == "delay";
-                            HorizontalLayout {
-                                spacing: 12px;
-                                Slider {
-                                    y: 18px;
-                                    minimum: 100;
-                                    maximum: 1000;
-                                    step: 50;
-                                    enabled: root.hover-expand;
-                                    value <=> root.hover-delay;
-                                    changed => { root.changed("delay"); }
-                                }
-                                Text {
-                                    width: 52px;
-                                    text: round(root.hover-delay) + " ms";
-                                    font-size: 13px;
-                                    color: S.ink-muted;
-                                    vertical-alignment: center;
-                                    horizontal-alignment: right;
+                                    options: ["Auto", "Light", "Dark"];
+                                    enabled: !(root.look == 1 && root.glass-window);
+                                    current <=> root.theme;
+                                    selected => { root.changed("theme"); }
                                 }
                             }
                         }
-                        Row {
-                            name: "Keep the island open";
-                            new-badge: true;
-                            min-h: 78px;
-                            desc: "Pinned: the island stays open on any edge, as if you never moved away. Same as the pin in the island. Esc or Win + Alt + I unpins it.";
-                            saved: root.saved-key == "pin";
-                            Toggle { y: 18px; checked <=> root.keep-open; toggled => { root.changed("pin"); } }
-                        }
-                        Row {
-                            name: "Soft shadow";
-                            new-badge: true;
-                            desc: "A soft shadow under the island so it floats a little off the desktop.";
-                            saved: root.saved-key == "shadow";
-                            Toggle { y: 18px; checked <=> root.soft-shadow; toggled => { root.changed("shadow"); } }
-                        }
-                    }
-                    SectionTitle { text: "At a glance"; }
-                    Card {
-                        Row {
-                            first: true;
-                            name: "Clock and battery in the pill";
-                            min-h: 64px;
-                            desc: "When nothing is live, the small island shows a feature on the left and the clock or date and the battery on the right.";
-                            saved: root.saved-key == "glance";
-                            Toggle { y: 18px; checked <=> root.pill-glance; toggled => { root.changed("glance"); } }
-                        }
-                        Row {
-                            name: "Featured on the left";
-                            min-h: 78px;
-                            desc: root.pill-glance ? "What sits on the left of the pill while it's quiet. Live activities still take over." : "Turn on Clock and battery in the pill to change this.";
-                            saved: root.saved-key == "featured";
-                            Segmented {
-                                y: 12px;
-                                options: ["None", "Media", "Timer", "Pet", "Focus"];
-                                current <=> root.featured;
-                                selected => { root.changed("featured"); }
-                            }
-                        }
-                        Row {
-                            name: "Show on the right";
-                            new-badge: true;
-                            min-h: 78px;
-                            desc: "For the quiet pill and the top of the open island (shortened there when many tabs need the room). The time follows your Windows format.";
-                            saved: root.saved-key == "clock";
-                            Segmented {
-                                y: 12px;
-                                options: ["Clock", "Clock and date", "Date"];
-                                current <=> root.clock;
-                                selected => { root.changed("clock"); }
-                            }
-                        }
-                        Row {
-                            name: "Clock in the open island";
-                            desc: "Shows it next to the battery at the top of the expanded island.";
-                            saved: root.saved-key == "hdate";
-                            Toggle { y: 18px; checked <=> root.header-date; toggled => { root.changed("hdate"); } }
-                        }
-                    }
-                    SectionTitle { text: "Look and motion"; }
-                    Card {
-                        Row {
-                            first: true;
-                            name: "Theme";
-                            min-h: 78px;
-                            desc: "Sets the island and this window together. “Use Windows setting” picks Light or Dark from Windows.";
-                            saved: root.saved-key == "theme";
-                            Segmented {
-                                y: 12px;
-                                options: ["Use Windows setting", "Light", "Dark", "Liquid Glass"];
-                                current <=> root.theme;
-                                selected => { root.changed("theme"); }
-                            }
-                        }
-                        Row {
-                            name: "Island style";
-                            min-h: 78px;
-                            desc: root.taskbar ? "In the taskbar the island is always a notch."
-                                : root.theme == 3 ? "Liquid Glass is always a dynamic pill."
-                                : "A notch joined to the screen edge, or a pill that floats just below it.";
-                            saved: root.saved-key == "style";
-                            Segmented {
-                                y: 12px;
-                                options: ["Notch", "Dynamic pill"];
-                                current <=> root.island-style;
-                                selected => { root.changed("style"); }
-                            }
-                        }
-                        if root.theme == 3 : Row {
-                            name: "Glass tint";
-                            min-h: 64px;
-                            desc: "Colors the glass, and this window’s highlights. White is clear glass.";
-                            saved: root.saved-key == "tint";
-                            ColorPicker {
-                                y: 12px;
-                                colors: [#ffffff, #1482ff, #ec488c, #1ebe96, #282830];
-                                current: root.glass-tint;
-                                custom-active: root.glass-tint-custom;
-                                picked(c) => { root.set-pet-color(2, c); }
-                                custom => { root.pick-pet-color(2); }
-                            }
-                        }
-                        if root.theme == 3 : Row {
-                            name: "Glass effects";
-                            min-h: 78px;
-                            desc: "Live bends and colors what’s behind the island. Still never looks at the screen. Battery saver and Windows’ Transparency effects switch it to Still too.";
-                            saved: root.saved-key == "glasslive";
-                            Segmented {
-                                y: 12px;
-                                options: ["Live", "Still"];
-                                current: root.glass-live ? 0 : 1;
-                                selected(i) => {
-                                    root.glass-live = i == 0;
-                                    root.changed("glasslive");
-                                }
-                            }
-                        }
-                        Row {
-                            name: "Reduce animations";
-                            min-h: 78px;
-                            desc: root.system-reduce-motion ? "Windows “Animation effects” is off, so Islo already uses quick fades." : "Swaps the bounce for a quick fade and stops the waveform. Follows Windows “Animation effects” until you change it.";
-                            saved: root.saved-key == "reduce";
-                            Toggle { y: 18px; checked <=> root.reduce-motion; toggled => { root.changed("reduce"); } }
-                        }
-                        Row {
-                            name: "Show on";
-                            min-h: 78px;
-                            desc: "Where the island appears when more than one display is connected.";
-                            saved: root.saved-key == "showon";
-                            Segmented {
-                                y: 12px;
-                                options: ["Main display", "All displays", "Display with the pointer"];
-                                current <=> root.show-on;
-                                selected => { root.changed("showon"); }
-                            }
-                        }
-                    }
-                }
 
-                // ======== Modules ========
-                if root.page == 2 : VerticalLayout {
-                    spacing: 12px;
-                    Card {
-                        Row {
-                            first: true;
-                            glyph: Icons.note;
-                            glyph-color: S.rose;
-                            name: "Media controls";
-                            desc: "Show what's playing from Spotify, browsers and other apps.";
-                            saved: root.saved-key == "media";
-                            Toggle { y: 18px; checked <=> root.mod-media; toggled => { root.changed("media"); } }
+                        if root.look == 1 : Rectangle { height: 4px; }
+                        if root.look == 1 : GroupTitle { text: "Liquid Glass"; }
+                        if root.look == 1 : Card {
+                            Row {
+                                first: true;
+                                name: "Glass tint";
+                                desc: "Colors the glass, and this window’s highlights. White is clear glass.";
+                                saved: root.saved-key == "tint";
+                                ColorPicker {
+                                    colors: [#ffffff, #1482ff, #ec488c, #1ebe96, #282830];
+                                    current: root.glass-tint;
+                                    custom-active: root.glass-tint-custom;
+                                    picked(c) => { root.set-pet-color(2, c); }
+                                    custom => { root.pick-pet-color(2); }
+                                }
+                            }
+                            Row {
+                                name: "Glass effects";
+                                desc: "Live bends and colors what’s behind the island. Still never looks at the screen. Windows’ Transparency effects off switches it to Still too.";
+                                saved: root.saved-key == "glasslive";
+                                Segmented {
+                                    options: ["Live", "Still"];
+                                    current: root.glass-live ? 0 : 1;
+                                    selected(i) => {
+                                        root.glass-live = i == 0;
+                                        root.changed("glasslive");
+                                    }
+                                }
+                            }
+                            Row {
+                                name: "Frost";
+                                desc: root.glass-live ? "How much the picture behind the island is blurred." : "Pick Live to change this.";
+                                saved: root.saved-key == "frost";
+                                HorizontalLayout {
+                                    spacing: 12px;
+                                    Slider {
+                                        minimum: 0;
+                                        maximum: 100;
+                                        step: 5;
+                                        enabled: root.glass-live;
+                                        value <=> root.glass-frost;
+                                        changed => { root.changed("frost"); }
+                                    }
+                                    Text {
+                                        width: 40px;
+                                        text: round(root.glass-frost) + "%";
+                                        font-size: 12px;
+                                        color: S.ink-muted;
+                                        vertical-alignment: center;
+                                        horizontal-alignment: right;
+                                    }
+                                }
+                            }
+                            Row {
+                                name: "Glass in this window";
+                                desc: "Dresses Settings in dark glass with the tint as accent. Off: this window follows Mode.";
+                                saved: root.saved-key == "glasswin";
+                                Toggle { checked <=> root.glass-window; toggled => { root.changed("glasswin"); } }
+                            }
+                            Row {
+                                name: "Switch to Still on battery saver";
+                                desc: "Live glass looks at the screen; Still saves that work while Windows saves power.";
+                                saved: root.saved-key == "glasssaver";
+                                Toggle { checked <=> root.glass-saver; toggled => { root.changed("glasssaver"); } }
+                            }
                         }
-                        Row {
-                            name: "Colors from album art";
-                            new-badge: true;
-                            desc: "The waveform, the art's border and the controls take the album's color. Off: plain white.";
-                            saved: root.saved-key == "arttint";
-                            Toggle { y: 18px; checked <=> root.art-tint; toggled => { root.changed("arttint"); } }
+
+                        if root.look == 2 : Rectangle { height: 4px; }
+                        if root.look == 2 : GroupTitle { text: "Soft Bento"; }
+                        if root.look == 2 : Card {
+                            Row {
+                                first: true;
+                                name: "Accent";
+                                desc: "Sliders, switches, and the music bars when the album has no color.";
+                                saved: root.saved-key == "accent";
+                                Segmented {
+                                    options: ["Indigo", "Rose"];
+                                    current <=> root.accent-pick;
+                                    selected => { root.changed("accent"); }
+                                }
+                            }
                         }
-                        Row {
-                            name: "Rest after music pauses";
-                            new-badge: true;
-                            desc: root.mod-media ? "5 seconds after you pause, the pill goes back to the quiet view. Press play to bring it back." : "Turn on Media controls to change this.";
-                            saved: root.saved-key == "rest";
-                            Toggle { y: 18px; enabled: root.mod-media; checked <=> root.media-rest; toggled => { root.changed("rest"); } }
+
+                        Rectangle { height: 4px; }
+                        GroupTitle { text: "Style"; }
+                        Card {
+                            Row {
+                                first: true;
+                                name: "Island style";
+                                desc: root.taskbar ? "In the taskbar the island is always a notch."
+                                    : root.look == 1 ? "Liquid Glass is always a dynamic pill."
+                                    : root.look == 2 ? "Soft Bento is always a dynamic pill."
+                                    : "A notch joined to the screen edge, or a pill that floats just below it.";
+                                saved: root.saved-key == "style";
+                                // (shows what the island really is when the choice is locked)
+                                Segmented {
+                                    options: ["Notch", "Dynamic pill"];
+                                    enabled: root.look == 0 && !root.taskbar;
+                                    current: root.taskbar ? 0 : root.look != 0 ? 1 : root.island-style;
+                                    selected(i) => {
+                                        root.island-style = i;
+                                        root.changed("style");
+                                    }
+                                }
+                            }
+                            Row {
+                                name: "Soft shadow";
+                                desc: "A soft shadow under the island so it floats a little off the desktop.";
+                                saved: root.saved-key == "shadow";
+                                Toggle { checked <=> root.soft-shadow; toggled => { root.changed("shadow"); } }
+                            }
+                            Row {
+                                name: "Reduce animations";
+                                desc: root.system-reduce-motion ? "Windows “Animation effects” is off, so Islo already uses quick fades." : "Swaps the bounce for a quick fade and stops the waveform. Follows Windows “Animation effects” until you change it.";
+                                saved: root.saved-key == "reduce";
+                                Toggle { checked <=> root.reduce-motion; toggled => { root.changed("reduce"); } }
+                            }
                         }
-                        if root.has-lyrics : Row {
-                            glyph: Icons.note;
-                            glyph-color: S.rose;
-                            name: "Lyrics";
-                            new-badge: true;
-                            min-h: 64px;
-                            desc: "Synced lyrics from any player (Spotify, browsers, YouTube, desktop apps). A small lyrics mark shows whether the song has them.";
-                            saved: root.saved-key == "lyrics";
-                            Toggle { y: 18px; checked <=> root.mod-lyrics; toggled => { root.changed("lyrics"); } }
+                    }
+
+                    // ======== Island ========
+                    if root.page == 2 : VerticalLayout {
+                        spacing: 8px;
+                        GroupTitle { text: "Position"; }
+                        Card {
+                            Row {
+                                first: true;
+                                name: "Edge";
+                                desc: "Drag the island to any edge of the screen, or pick one here. On the left and right it turns vertical.";
+                                saved: root.saved-key == "edge";
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Segmented {
+                                        options: ["Top", "Bottom", "Left", "Right"];
+                                        current <=> root.edge;
+                                        selected => { root.changed("edge"); }
+                                    }
+                                    Button { text: "Reset"; clicked => { root.reset-position(); } }
+                                }
+                            }
+                            Row {
+                                name: "Inside the taskbar";
+                                desc: "The island sits in the middle of the taskbar and your taskbar apps move to the left. Turn it off, drag the island to another edge or quit Islo, and they go back.";
+                                saved: root.saved-key == "taskbar";
+                                Toggle { checked <=> root.taskbar; toggled => { root.changed("taskbar"); } }
+                            }
+                            Row {
+                                name: "On the left or right edge";
+                                desc: "The island shrinks to show only what's live. Hover a glyph to open that feature.";
+                                saved: root.saved-key == "side";
+                                Segmented {
+                                    options: ["Icon tab", "Thin sliver", "Full pill"];
+                                    current <=> root.side-style;
+                                    selected => { root.changed("side"); }
+                                }
+                            }
+                            Row {
+                                name: "Show on";
+                                desc: "Where the island appears when more than one display is connected.";
+                                saved: root.saved-key == "showon";
+                                Segmented {
+                                    options: ["Main", "All", "With the pointer"];
+                                    current <=> root.show-on;
+                                    selected => { root.changed("showon"); }
+                                }
+                            }
                         }
-                        if root.has-lyrics : Row {
-                            name: "Lyric lines";
-                            desc: root.mod-lyrics ? "Lines shown while you are not hovering. Hover the island to see the whole song." : "Turn on Lyrics to change this.";
-                            saved: root.saved-key == "lines";
-                            HorizontalLayout {
-                                spacing: 12px;
-                                Slider {
-                                    y: 18px;
-                                    minimum: 1;
-                                    maximum: 10;
-                                    step: 1;
+                        Rectangle { height: 4px; }
+                        GroupTitle { text: "Behavior"; }
+                        Card {
+                            Row {
+                                first: true;
+                                name: "Island width";
+                                desc: "How wide the small island is.";
+                                saved: root.saved-key == "width";
+                                HorizontalLayout {
+                                    spacing: 12px;
+                                    Slider {
+                                        minimum: 160;
+                                        maximum: 300;
+                                        step: 10;
+                                        value <=> root.width-px;
+                                        changed => { root.changed("width"); }
+                                    }
+                                    Text {
+                                        width: 48px;
+                                        text: round(root.width-px) + " px";
+                                        font-size: 12px;
+                                        color: S.ink-muted;
+                                        vertical-alignment: center;
+                                        horizontal-alignment: right;
+                                    }
+                                }
+                            }
+                            Row {
+                                name: "Expand on hover";
+                                desc: "The island opens when your pointer rests on it. Off: click to open.";
+                                saved: root.saved-key == "hover";
+                                Toggle { checked <=> root.hover-expand; toggled => { root.changed("hover"); } }
+                            }
+                            Row {
+                                name: "Hover delay";
+                                desc: root.hover-expand ? "How long your pointer rests before the island opens." : "Turn on Expand on hover to change this.";
+                                saved: root.saved-key == "delay";
+                                HorizontalLayout {
+                                    spacing: 12px;
+                                    Slider {
+                                        minimum: 100;
+                                        maximum: 1000;
+                                        step: 50;
+                                        enabled: root.hover-expand;
+                                        value <=> root.hover-delay;
+                                        changed => { root.changed("delay"); }
+                                    }
+                                    Text {
+                                        width: 48px;
+                                        text: round(root.hover-delay) + " ms";
+                                        font-size: 12px;
+                                        color: S.ink-muted;
+                                        vertical-alignment: center;
+                                        horizontal-alignment: right;
+                                    }
+                                }
+                            }
+                            Row {
+                                name: "Keep the island open";
+                                desc: "Pinned: the island stays open, same as the pin in the island. Esc or Win + Alt + I unpins it.";
+                                saved: root.saved-key == "pin";
+                                Toggle { checked <=> root.keep-open; toggled => { root.changed("pin"); } }
+                            }
+                        }
+                    }
+
+                    // ======== At a glance ========
+                    if root.page == 3 : VerticalLayout {
+                        spacing: 8px;
+                        GroupTitle { text: "Quiet pill"; }
+                        Card {
+                            Row {
+                                first: true;
+                                name: "Clock and battery in the pill";
+                                desc: "When nothing is live, the small island shows a feature on the left and the clock or date and the battery on the right.";
+                                saved: root.saved-key == "glance";
+                                Toggle { checked <=> root.pill-glance; toggled => { root.changed("glance"); } }
+                            }
+                            Row {
+                                name: "Featured on the left";
+                                desc: root.pill-glance ? "What sits on the left of the pill while it's quiet. Live activities still take over." : "Turn on Clock and battery in the pill to change this.";
+                                saved: root.saved-key == "featured";
+                                Segmented {
+                                    options: ["None", "Media", "Timer", "Pet", "Focus"];
+                                    enabled: root.pill-glance;
+                                    current <=> root.featured;
+                                    selected => { root.changed("featured"); }
+                                }
+                            }
+                            Row {
+                                name: "Show on the right";
+                                desc: "For the quiet pill and the top of the open island. The time follows your Windows format.";
+                                saved: root.saved-key == "clock";
+                                Segmented {
+                                    options: ["Clock", "Clock and date", "Date"];
+                                    current <=> root.clock;
+                                    selected => { root.changed("clock"); }
+                                }
+                            }
+                        }
+                        Rectangle { height: 4px; }
+                        GroupTitle { text: "Open island"; }
+                        Card {
+                            Row {
+                                first: true;
+                                name: "Clock in the open island";
+                                desc: "Shows it next to the battery at the top of the expanded island.";
+                                saved: root.saved-key == "hdate";
+                                Toggle { checked <=> root.header-date; toggled => { root.changed("hdate"); } }
+                            }
+                        }
+                    }
+
+                    // ======== Media & lyrics ========
+                    if root.page == 4 : VerticalLayout {
+                        spacing: 8px;
+                        GroupTitle { text: "Media"; }
+                        Card {
+                            Row {
+                                first: true;
+                                name: "Media controls";
+                                desc: "Show what's playing from Spotify, browsers and other apps.";
+                                saved: root.saved-key == "media";
+                                Toggle { checked <=> root.mod-media; toggled => { root.changed("media"); } }
+                            }
+                            Row {
+                                name: "Colors from album art";
+                                desc: "The waveform, the art's border and the controls take the album's color.";
+                                saved: root.saved-key == "arttint";
+                                Toggle { checked <=> root.art-tint; toggled => { root.changed("arttint"); } }
+                            }
+                            Row {
+                                name: "Rest after music pauses";
+                                desc: root.mod-media ? "5 seconds after you pause, the pill goes back to the quiet view. Press play to bring it back." : "Turn on Media controls to change this.";
+                                saved: root.saved-key == "rest";
+                                Toggle { enabled: root.mod-media; checked <=> root.media-rest; toggled => { root.changed("rest"); } }
+                            }
+                            Row {
+                                name: "Volume and brightness";
+                                desc: "Islo's own indicator replaces the Windows one while the island is on screen.";
+                                saved: root.saved-key == "hud";
+                                Toggle { checked <=> root.mod-hud; toggled => { root.changed("hud"); } }
+                            }
+                        }
+                        if root.has-lyrics : Rectangle { height: 4px; }
+                        if root.has-lyrics : GroupTitle { text: "Lyrics"; }
+                        if root.has-lyrics : Card {
+                            Row {
+                                first: true;
+                                name: "Lyrics";
+                                desc: "Synced lyrics from any player (Spotify, browsers, YouTube, desktop apps). A small mark shows whether the song has them.";
+                                saved: root.saved-key == "lyrics";
+                                Toggle { checked <=> root.mod-lyrics; toggled => { root.changed("lyrics"); } }
+                            }
+                            Row {
+                                name: "Lyric lines";
+                                desc: root.mod-lyrics ? "Lines shown while you are not hovering. Hover the island to see the whole song." : "Turn on Lyrics to change this.";
+                                saved: root.saved-key == "lines";
+                                HorizontalLayout {
+                                    spacing: 12px;
+                                    Slider {
+                                        minimum: 1;
+                                        maximum: 10;
+                                        step: 1;
+                                        enabled: root.mod-lyrics;
+                                        value <=> root.lyric-lines;
+                                        changed => { root.changed("lines"); }
+                                    }
+                                    Text {
+                                        width: 48px;
+                                        text: root.lyric-lines == 1 ? "1 line" : round(root.lyric-lines) + " lines";
+                                        font-size: 12px;
+                                        color: S.ink-muted;
+                                        vertical-alignment: center;
+                                        horizontal-alignment: right;
+                                    }
+                                }
+                            }
+                            Row {
+                                name: "Lyrics alignment";
+                                desc: root.mod-lyrics ? "Lines under the closed island and the whole song in the open one." : "Turn on Lyrics to change this.";
+                                saved: root.saved-key == "align";
+                                Segmented {
+                                    options: ["Left", "Center", "Right"];
                                     enabled: root.mod-lyrics;
-                                    value <=> root.lyric-lines;
-                                    changed => { root.changed("lines"); }
-                                }
-                                Text {
-                                    width: 52px;
-                                    text: root.lyric-lines == 1 ? "1 line" : round(root.lyric-lines) + " lines";
-                                    font-size: 13px;
-                                    color: S.ink-muted;
-                                    vertical-alignment: center;
-                                    horizontal-alignment: right;
+                                    current <=> root.lyric-align;
+                                    selected => { root.changed("align"); }
                                 }
                             }
                         }
-                        if root.has-lyrics : Row {
-                            name: "Lyrics alignment";
-                            new-badge: true;
-                            min-h: 78px;
-                            desc: root.mod-lyrics ? "Lines under the closed island and the whole song in the open one." : "Turn on Lyrics to change this.";
-                            saved: root.saved-key == "align";
-                            Segmented {
-                                y: 12px;
-                                options: ["Left", "Center", "Right"];
-                                current <=> root.lyric-align;
-                                selected => { root.changed("align"); }
+                    }
+
+                    // ======== Live activity ========
+                    if root.page == 5 : VerticalLayout {
+                        spacing: 8px;
+                        GroupTitle { text: "In the island"; }
+                        Card {
+                            Row {
+                                first: true;
+                                name: "Battery and charging";
+                                desc: "Show the charge when you plug in, and warn when the battery runs low.";
+                                saved: root.saved-key == "battery";
+                                Toggle { checked <=> root.mod-battery; toggled => { root.changed("battery"); } }
+                            }
+                            Row {
+                                name: "File shelf";
+                                desc: "A tab where files wait for you: drag them onto the island, add or paste them, then drag them out anywhere.";
+                                saved: root.saved-key == "shelf";
+                                Toggle { checked <=> root.mod-shelf; toggled => { root.changed("shelf"); } }
+                            }
+                            if root.has-live : Row {
+                                name: "Timers";
+                                desc: "Start a timer from the opened island; it counts down in the pill.";
+                                saved: root.saved-key == "timer";
+                                Toggle { checked <=> root.mod-timer; toggled => { root.changed("timer"); } }
+                            }
+                            if root.has-live : Row {
+                                name: "Mic and camera";
+                                desc: "A steady dot while an app uses them.";
+                                saved: root.saved-key == "privacy";
+                                Toggle { checked <=> root.mod-privacy; toggled => { root.changed("privacy"); } }
+                            }
+                            if root.has-live : Row {
+                                name: "Focus";
+                                desc: "Show when Windows Focus is on.";
+                                saved: root.saved-key == "focus";
+                                Toggle { checked <=> root.mod-focus; toggled => { root.changed("focus"); } }
                             }
                         }
-                        Row {
-                            glyph: Icons.speaker;
-                            glyph-color: S.ink;
-                            name: "Volume and brightness";
-                            desc: "Replace the Windows flyout with a quiet pill in the island.";
-                            saved: root.saved-key == "hud";
-                            Toggle { y: 18px; checked <=> root.mod-hud; toggled => { root.changed("hud"); } }
-                        }
-                        Row {
-                            glyph: Icons.bolt;
-                            glyph-color: S.green;
-                            name: "Battery and charging";
-                            desc: "Show the charge when you plug in, and warn when the battery runs low.";
-                            saved: root.saved-key == "battery";
-                            Toggle { y: 18px; checked <=> root.mod-battery; toggled => { root.changed("battery"); } }
-                        }
-                        Row {
-                            name: "File shelf";
-                            new-badge: true;
-                            desc: "A tab where files wait for you: drag them onto the island, add or paste them, then drag them out anywhere.";
-                            saved: root.saved-key == "shelf";
-                            Toggle { y: 18px; checked <=> root.mod-shelf; toggled => { root.changed("shelf"); } }
-                        }
-                        if root.has-live : Row {
-                            name: "Timers";
-                            desc: "Start a timer from the opened island; it counts down in the pill.";
-                            saved: root.saved-key == "timer";
-                            Toggle { y: 18px; checked <=> root.mod-timer; toggled => { root.changed("timer"); } }
-                        }
-                        if root.has-live : Row {
-                            name: "Mic and camera";
-                            desc: "A steady dot while an app uses them.";
-                            saved: root.saved-key == "privacy";
-                            Toggle { y: 18px; checked <=> root.mod-privacy; toggled => { root.changed("privacy"); } }
-                        }
-                        if root.has-live : Row {
-                            glyph: Icons.moon;
-                            glyph-color: S.indigo;
-                            name: "Focus";
-                            desc: "Show when Windows Focus is on.";
-                            saved: root.saved-key == "focus";
-                            Toggle { y: 18px; checked <=> root.mod-focus; toggled => { root.changed("focus"); } }
-                        }
-                        Row {
-                            name: "Notifications";
-                            desc: root.notifications-desc;
-                            saved: root.saved-key == "notifications";
-                            min-h: 72px;
-                            // Remove unregisters Islo (and restarts it); centered with the toggle
-                            if root.notifications-setup == 0 : HorizontalLayout {
-                                spacing: 16px;
-                                VerticalLayout {
-                                    alignment: center;
+                        Rectangle { height: 4px; }
+                        GroupTitle { text: "Notifications"; }
+                        Card {
+                            Row {
+                                first: true;
+                                name: "Notifications";
+                                desc: root.notifications-desc;
+                                saved: root.saved-key == "notifications";
+                                // Remove unregisters Islo (and restarts it)
+                                if root.notifications-setup == 0 : HorizontalLayout {
+                                    spacing: 12px;
+                                    alignment: end;
                                     Button {
                                         text: "Remove";
                                         clicked => { root.remove-notifications(); }
                                     }
-                                }
-                                VerticalLayout {
-                                    alignment: center;
-                                    Toggle {
-                                        checked <=> root.mod-notifications;
-                                        toggled => { root.changed("notifications"); }
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Toggle {
+                                            checked <=> root.mod-notifications;
+                                            toggled => { root.changed("notifications"); }
+                                        }
                                     }
                                 }
-                            }
-                            if root.notifications-setup == 1 : Button {
-                                y: 20px;
-                                text: "Set up";
-                                clicked => { root.set-up-notifications(); }
-                            }
-                        }
-                    }
-
-                    if root.has-pet : SectionTitle { text: "Pet"; }
-                    if root.has-pet : Card {
-                        Row {
-                            first: true;
-                            name: "Pet";
-                            new-badge: true;
-                            min-h: 64px;
-                            desc: "Mochi, the Islo mascot, lives in the island. It naps when you stop moving the pointer and never moves in full-screen apps.";
-                            saved: root.saved-key == "pet";
-                            Toggle { y: 18px; checked <=> root.mod-pet; toggled => { root.changed("pet"); } }
-                        }
-                        Row {
-                            name: "Name";
-                            desc: "Friends see this name when your pet visits.";
-                            saved: root.saved-key == "petname";
-                            TextField { y: 12px; text <=> root.pet-name; edited => { root.changed("petname"); } }
-                        }
-                        Row {
-                            name: "Look";
-                            min-h: 64px;
-                            desc: "Start from a preset, then change either color below.";
-                            saved: root.saved-key == "skin";
-                            SkinPicker {
-                                y: 10px;
-                                current <=> root.pet-skin;
-                                selected => { root.changed("skin"); }
-                            }
-                        }
-                        Row {
-                            name: "Body color";
-                            min-h: 64px;
-                            desc: "Mochi's head, ears and all.";
-                            saved: root.saved-key == "petbody";
-                            ColorPicker {
-                                y: 12px;
-                                colors: [#000000, #3a3a3a, #f5f5f5, #fc90bc, #f99f55, #d3b63b, #6fd087, #71bfff];
-                                current: root.pet-body;
-                                custom-active: root.pet-body-custom;
-                                picked(c) => { root.set-pet-color(0, c); }
-                                custom => { root.pick-pet-color(0); }
-                            }
-                        }
-                        Row {
-                            name: "Eye color";
-                            min-h: 64px;
-                            desc: root.pet-eyes-desc;
-                            saved: root.saved-key == "peteyes";
-                            ColorPicker {
-                                y: 12px;
-                                colors: [#d3b63b, #000000, #ffffff, #fc90bc, #f99f55, #6fd087, #71bfff];
-                                current: root.pet-eyes;
-                                custom-active: root.pet-eyes-custom;
-                                picked(c) => { root.set-pet-color(1, c); }
-                                custom => { root.pick-pet-color(1); }
-                            }
-                        }
-                        Row {
-                            name: "Size";
-                            desc: "How big Mochi is when it comes out of the island.";
-                            saved: root.saved-key == "petsize";
-                            Segmented {
-                                y: 12px;
-                                options: ["Small", "Medium", "Large"];
-                                current <=> root.pet-size;
-                                selected => { root.changed("petsize"); }
-                            }
-                        }
-                        Row {
-                            name: "Come out of the island";
-                            min-h: 78px;
-                            desc: root.reduce-motion || root.system-reduce-motion ? "Off while Reduce animations is on." : "Now and then, unless something urgent is showing, Mochi peeks out or walks around the island. It keeps going while you hover, and gets dragged along when the island opens. Click Mochi and it hides.";
-                            saved: root.saved-key == "peek";
-                            Toggle { y: 18px; checked <=> root.pet-peek; toggled => { root.changed("peek"); } }
-                        }
-                        Row {
-                            name: "What Mochi does";
-                            desc: root.pet-peek ? "Peek from under or beside the island, walk all the way around it, or a mix." : "Turn on Come out of the island to change this.";
-                            saved: root.saved-key == "moves";
-                            Segmented {
-                                y: 12px;
-                                options: ["Peek", "Walk around", "Both"];
-                                current <=> root.pet-moves;
-                                selected => { root.changed("moves"); }
-                            }
-                        }
-                        Row {
-                            name: "How often";
-                            desc: "Rarely: every minute or so. Sometimes: every 15 to 35 seconds. Often: every few seconds.";
-                            min-h: 64px;
-                            saved: root.saved-key == "often";
-                            Segmented {
-                                y: 12px;
-                                options: ["Rarely", "Sometimes", "Often"];
-                                current <=> root.pet-often;
-                                selected => { root.changed("often"); }
-                            }
-                        }
-                        Row {
-                            name: "Eyes follow the pointer";
-                            min-h: 64px;
-                            desc: "Mochi watches your pointer while it's on screen. Turn this off and Mochi only wakes when you hover the island.";
-                            saved: root.saved-key == "track";
-                            Toggle { y: 18px; checked <=> root.pet-track; toggled => { root.changed("track"); } }
-                        }
-                        Row {
-                            name: "Pet and carry Mochi";
-                            new-badge: true;
-                            min-h: 64px;
-                            desc: "Stroke Mochi back and forth to pet it. Press and drag it to carry it around the island.";
-                            saved: root.saved-key == "touch";
-                            Toggle { y: 18px; checked <=> root.pet-touch; toggled => { root.changed("touch"); } }
-                        }
-                        Row {
-                            name: "Visit friends nearby";
-                            min-h: 64px;
-                            desc: "Uses Bluetooth to find Islo on PCs in the same room. Any device in range can read your pet's name. Nothing goes over the internet.";
-                            saved: root.saved-key == "nearby";
-                            Toggle { y: 18px; checked <=> root.pet-nearby; toggled => { root.changed("nearby"); } }
-                        }
-                        Row {
-                            name: "Show my name";
-                            min-h: 64px;
-                            desc: root.pet-share-name
-                                ? "Friends see “" + root.owner-name + "'s laptop”. Any device in Bluetooth range can read this name."
-                                : "Friends see “A friend's laptop”. Turn on to show your first name, " + root.owner-name + ", instead.";
-                            saved: root.saved-key == "sharename";
-                            Toggle {
-                                y: 18px;
-                                enabled: root.pet-nearby;
-                                checked <=> root.pet-share-name;
-                                toggled => { root.changed("sharename"); }
+                                if root.notifications-setup == 1 : Button {
+                                    text: "Set up";
+                                    clicked => { root.set-up-notifications(); }
+                                }
                             }
                         }
                     }
 
-                    SectionTitle { text: "Games"; }
-                    Card {
-                        Row {
-                            first: true;
-                            name: "Tic-tac-toe";
-                            new-badge: true;
-                            desc: "A tab with tic-tac-toe: play Mochi at Easy, Medium or Hard.";
-                            saved: root.saved-key == "games";
-                            Toggle { y: 18px; checked <=> root.games; toggled => { root.changed("games"); } }
+                    // ======== Mochi ========
+                    if root.page == 6 : VerticalLayout {
+                        spacing: 8px;
+                        GroupTitle { text: "Your pet"; }
+                        Card {
+                            Row {
+                                first: true;
+                                name: "Pet";
+                                desc: "Mochi, the Islo mascot, lives in the island. It naps when you stop moving the pointer and never moves in full-screen apps.";
+                                saved: root.saved-key == "pet";
+                                Toggle { checked <=> root.mod-pet; toggled => { root.changed("pet"); } }
+                            }
+                            Row {
+                                name: "Name";
+                                desc: "Friends see this name when your pet visits.";
+                                saved: root.saved-key == "petname";
+                                TextField { text <=> root.pet-name; edited => { root.changed("petname"); } }
+                            }
+                            Row {
+                                name: "Look";
+                                desc: "Start from a preset, then change either color below.";
+                                saved: root.saved-key == "skin";
+                                SkinPicker {
+                                    current <=> root.pet-skin;
+                                    selected => { root.changed("skin"); }
+                                }
+                            }
+                            Row {
+                                name: "Body color";
+                                desc: "Mochi's head, ears and all.";
+                                saved: root.saved-key == "petbody";
+                                ColorPicker {
+                                    colors: [#000000, #3a3a3a, #f5f5f5, #fc90bc, #f99f55, #d3b63b, #6fd087, #71bfff];
+                                    current: root.pet-body;
+                                    custom-active: root.pet-body-custom;
+                                    picked(c) => { root.set-pet-color(0, c); }
+                                    custom => { root.pick-pet-color(0); }
+                                }
+                            }
+                            Row {
+                                name: "Eye color";
+                                desc: root.pet-eyes-desc;
+                                saved: root.saved-key == "peteyes";
+                                ColorPicker {
+                                    colors: [#d3b63b, #000000, #ffffff, #fc90bc, #f99f55, #6fd087, #71bfff];
+                                    current: root.pet-eyes;
+                                    custom-active: root.pet-eyes-custom;
+                                    picked(c) => { root.set-pet-color(1, c); }
+                                    custom => { root.pick-pet-color(1); }
+                                }
+                            }
+                            Row {
+                                name: "Size";
+                                desc: "How big Mochi is when it comes out of the island.";
+                                saved: root.saved-key == "petsize";
+                                Segmented {
+                                    options: ["Small", "Medium", "Large"];
+                                    current <=> root.pet-size;
+                                    selected => { root.changed("petsize"); }
+                                }
+                            }
                         }
-                        Row {
-                            name: "Online games";
-                            min-h: 64px;
-                            desc: !root.online-built ? "This build of Islo has no game server set up."
-                                : "Play a friend anywhere with a 4-letter room code. Moves go through Islo's free relay, nothing else is stored. On busy days the free server can run out until tomorrow.";
-                            saved: root.saved-key == "online";
-                            Toggle { y: 18px; enabled: root.games && root.online-built; checked <=> root.games-online; toggled => { root.changed("online"); } }
+                        Rectangle { height: 4px; }
+                        GroupTitle { text: "Out and about"; }
+                        Card {
+                            Row {
+                                first: true;
+                                name: "Come out of the island";
+                                desc: root.reduce-motion || root.system-reduce-motion ? "Off while Reduce animations is on." : "Now and then, unless something urgent is showing, Mochi peeks out or walks around the island. Click Mochi and it hides.";
+                                saved: root.saved-key == "peek";
+                                Toggle { checked <=> root.pet-peek; toggled => { root.changed("peek"); } }
+                            }
+                            Row {
+                                name: "What Mochi does";
+                                desc: root.pet-peek ? "Peek from under or beside the island, walk all the way around it, or a mix." : "Turn on Come out of the island to change this.";
+                                saved: root.saved-key == "moves";
+                                Segmented {
+                                    options: ["Peek", "Walk around", "Both"];
+                                    enabled: root.pet-peek;
+                                    current <=> root.pet-moves;
+                                    selected => { root.changed("moves"); }
+                                }
+                            }
+                            Row {
+                                name: "How often";
+                                desc: "Rarely: every minute or so. Sometimes: every 15 to 35 seconds. Often: every few seconds.";
+                                saved: root.saved-key == "often";
+                                Segmented {
+                                    options: ["Rarely", "Sometimes", "Often"];
+                                    current <=> root.pet-often;
+                                    selected => { root.changed("often"); }
+                                }
+                            }
+                            Row {
+                                name: "Eyes follow the pointer";
+                                desc: "Mochi watches your pointer while it's on screen. Off: Mochi only wakes when you hover the island.";
+                                saved: root.saved-key == "track";
+                                Toggle { checked <=> root.pet-track; toggled => { root.changed("track"); } }
+                            }
+                            Row {
+                                name: "Pet and carry Mochi";
+                                desc: "Stroke Mochi back and forth to pet it. Press and drag it to carry it around the island.";
+                                saved: root.saved-key == "touch";
+                                Toggle { checked <=> root.pet-touch; toggled => { root.changed("touch"); } }
+                            }
+                        }
+                        Rectangle { height: 4px; }
+                        GroupTitle { text: "Friends"; }
+                        Card {
+                            Row {
+                                first: true;
+                                name: "Visit friends nearby";
+                                desc: "Uses Bluetooth to find Islo on PCs in the same room. Any device in range can read your pet's name. Nothing goes over the internet.";
+                                saved: root.saved-key == "nearby";
+                                Toggle { checked <=> root.pet-nearby; toggled => { root.changed("nearby"); } }
+                            }
+                            Row {
+                                name: "Show my name";
+                                desc: root.pet-share-name
+                                    ? "Friends see “" + root.owner-name + "'s laptop”. Any device in Bluetooth range can read this name."
+                                    : "Friends see “A friend's laptop”. Turn on to show your first name, " + root.owner-name + ", instead.";
+                                saved: root.saved-key == "sharename";
+                                Toggle {
+                                    enabled: root.pet-nearby;
+                                    checked <=> root.pet-share-name;
+                                    toggled => { root.changed("sharename"); }
+                                }
+                            }
                         }
                     }
 
-                    SectionTitle { text: "Full-screen apps"; }
-                    Card {
-                        Row {
-                            first: true;
-                            name: "Hide in full-screen apps";
-                            desc: "The island steps aside for games, videos and presentations, and comes back when you leave.";
-                            saved: root.saved-key == "fullscreen";
-                            Toggle { y: 18px; checked <=> root.hide-fullscreen; toggled => { root.changed("fullscreen"); } }
-                        }
-                        Row {
-                            name: "Pause animations on battery saver";
-                            desc: "Stops the waveform and other loops while Windows saves power.";
-                            saved: root.saved-key == "saver";
-                            Toggle { y: 18px; checked <=> root.saver-pause; toggled => { root.changed("saver"); } }
+                    // ======== Games ========
+                    if root.page == 7 : VerticalLayout {
+                        spacing: 8px;
+                        GroupTitle { text: "Tic-tac-toe"; }
+                        Card {
+                            Row {
+                                first: true;
+                                name: "Tic-tac-toe";
+                                desc: "A tab with tic-tac-toe: play Mochi at Easy, Medium or Hard.";
+                                saved: root.saved-key == "games";
+                                Toggle { checked <=> root.games; toggled => { root.changed("games"); } }
+                            }
+                            Row {
+                                name: "Online games";
+                                desc: !root.online-built ? "This build of Islo has no game server set up."
+                                    : "Play a friend anywhere with a 4-letter room code. Moves go through Islo's free relay, nothing else is stored.";
+                                saved: root.saved-key == "online";
+                                Toggle { enabled: root.games && root.online-built; checked <=> root.games-online; toggled => { root.changed("online"); } }
+                            }
                         }
                     }
 
-                    SectionTitle { text: "Reset"; }
-                    Card {
-                        Row {
-                            first: true;
-                            name: "Restore default settings";
-                            desc: "Puts every setting back the way Islo shipped.";
-                            Button { y: 12px; text: "Restore defaults"; clicked => { root.restore-defaults(); } }
+                    // ======== Full screen & power ========
+                    if root.page == 8 : VerticalLayout {
+                        spacing: 8px;
+                        GroupTitle { text: "Full-screen apps"; }
+                        Card {
+                            Row {
+                                first: true;
+                                name: "Hide in full-screen apps";
+                                desc: "The island steps aside for games, videos and presentations, and comes back when you leave.";
+                                saved: root.saved-key == "fullscreen";
+                                Toggle { checked <=> root.hide-fullscreen; toggled => { root.changed("fullscreen"); } }
+                            }
+                        }
+                        Rectangle { height: 4px; }
+                        GroupTitle { text: "Power"; }
+                        Card {
+                            Row {
+                                first: true;
+                                name: "Pause animations on battery saver";
+                                desc: "Stops the waveform and other loops while Windows saves power.";
+                                saved: root.saved-key == "saver";
+                                Toggle { checked <=> root.saver-pause; toggled => { root.changed("saver"); } }
+                            }
+                        }
+                    }
+
+                    // ======== Shortcuts ========
+                    if root.page == 9 : VerticalLayout {
+                        spacing: 8px;
+                        GroupTitle { text: "Keyboard and mouse"; }
+                        Card {
+                            Row {
+                                first: true;
+                                name: "Open or close the island";
+                                desc: "Works from any app.";
+                                Badge { text: "Win + Alt + I"; }
+                            }
+                            Row {
+                                name: "Close the island";
+                                desc: "While the island is open.";
+                                Badge { text: "Esc"; }
+                            }
+                            Row {
+                                name: "Change volume";
+                                desc: "Scroll on the island.";
+                                Badge { text: "Scroll"; }
+                            }
+                            Row {
+                                name: "Move the island";
+                                desc: "Drag it to any edge of the screen.";
+                                Badge { text: "Drag"; }
+                            }
+                        }
+                    }
+
+                    // ======== About ========
+                    if root.page == 10 : VerticalLayout {
+                        spacing: 8px;
+                        HorizontalLayout {
+                            padding-bottom: 8px;
+                            spacing: 14px;
+                            alignment: start;
+                            BrandMark {
+                                width: 56px;
+                                height: 56px;
+                                on-dark: S.dark;
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                spacing: 2px;
+                                Text { text: "Islo"; font-size: 22px; font-weight: 600; color: S.ink; }
+                                Text { text: "Version " + root.version; font-size: 12px; color: S.ink-muted; }
+                            }
+                        }
+                        GroupTitle { text: "Updates"; }
+                        Card {
+                            Row {
+                                first: true;
+                                name: root.update-state == 2 ? "Version " + root.update-version + " is available"
+                                    : root.update-state == 1 ? "Checking for updates…"
+                                    : root.update-state == 3 ? "Installing " + root.update-version + "…"
+                                    : root.update-state == 4 ? "Islo is up to date"
+                                    : root.update-state == 5 ? "Couldn't update"
+                                    : "Updates";
+                                desc: root.update-desc;
+                                new-badge: root.update-state == 2;
+                                if root.update-state == 2 : Button {
+                                    text: "Install and restart";
+                                    primary: true;
+                                    clicked => { root.install-update(); }
+                                }
+                                if root.update-state != 1 && root.update-state != 2 && root.update-state != 3 : Button {
+                                    text: root.update-state == 5 ? "Try again" : "Check now";
+                                    clicked => { root.check-update(); }
+                                }
+                            }
+                            Row {
+                                name: "Release notes";
+                                desc: "See what changed in each version on GitHub.";
+                                Button { text: "Open"; clicked => { root.open-releases(); } }
+                            }
+                        }
+                        Rectangle { height: 4px; }
+                        GroupTitle { text: "This copy"; }
+                        Card {
+                            Row {
+                                first: true;
+                                name: "What it is";
+                                desc: "A Dynamic Island for Windows, written in Rust and Slint.";
+                            }
+                            Row {
+                                name: "Memory";
+                                desc: root.memory-text;
+                            }
+                            Row {
+                                name: "Lyrics";
+                                desc: "Synced lyrics come from LRCLIB (lrclib.net), a free, open lyrics database.";
+                            }
                         }
                     }
                 }
+              }
 
-                // ======== Shortcuts ========
-                if root.page == 3 : VerticalLayout {
-                    spacing: 12px;
-                    Card {
-                        Row {
-                            first: true;
-                            name: "Open or close the island";
-                            desc: "Works from any app.";
-                            Badge { y: 18px; text: "Win + Alt + I"; }
-                        }
-                        Row {
-                            name: "Close the island";
-                            desc: "While the island is open.";
-                            Badge { y: 18px; text: "Esc"; }
-                        }
-                        Row {
-                            name: "Change volume";
-                            desc: "Scroll on the island.";
-                            Badge { y: 18px; text: "Scroll"; }
-                        }
-                        Row {
-                            name: "Move the island";
-                            desc: "Drag it to any edge of the screen.";
-                            Badge { y: 18px; text: "Drag"; }
-                        }
-                    }
-                }
-
-                // ======== About ========
-                if root.page == 4 : VerticalLayout {
-                    spacing: 12px;
-                    HorizontalLayout {
-                        padding-top: 4px;
-                        padding-bottom: 8px;
-                        spacing: 14px;
-                        alignment: start;
-                        BrandMark {
-                            width: 64px;
-                            height: 64px;
-                            on-dark: S.dark;
-                        }
-                        VerticalLayout {
-                            alignment: center;
-                            spacing: 2px;
-                            Text { text: "Islo"; font-size: 28px; font-weight: 600; color: S.ink; }
-                            Text { text: "Version " + root.version; font-size: 12px; color: S.ink-muted; }
-                        }
-                    }
-                    SectionTitle { text: "Updates"; }
-                    Card {
-                        Row {
-                            first: true;
-                            name: root.update-state == 2 ? "Version " + root.update-version + " is available"
-                                : root.update-state == 1 ? "Checking for updates…"
-                                : root.update-state == 3 ? "Installing " + root.update-version + "…"
-                                : root.update-state == 4 ? "Islo is up to date"
-                                : root.update-state == 5 ? "Couldn't update"
-                                : "Updates";
-                            desc: root.update-desc;
-                            new-badge: root.update-state == 2;
-                            min-h: 64px;
-                            if root.update-state == 2 : Button {
-                                y: 16px;
-                                text: "Install and restart";
-                                primary: true;
-                                clicked => { root.install-update(); }
-                            }
-                            if root.update-state != 1 && root.update-state != 2 && root.update-state != 3 : Button {
-                                y: 16px;
-                                text: root.update-state == 5 ? "Try again" : "Check now";
-                                clicked => { root.check-update(); }
-                            }
-                        }
-                        Row {
-                            name: "Check automatically";
-                            desc: "Look for a new version when Islo starts and once a day. Nothing installs until you choose to.";
-                            saved: root.saved-key == "update_check";
-                            min-h: 64px;
-                            Toggle { y: 22px; checked <=> root.update-check; toggled => { root.changed("update_check"); } }
-                        }
-                        Row {
-                            name: "Release notes";
-                            desc: "See what changed in each version on GitHub.";
-                            Button { y: 12px; text: "Open"; clicked => { root.open-releases(); } }
-                        }
-                    }
-                    Card {
-                        Row {
-                            first: true;
-                            name: "What it is";
-                            desc: "A Dynamic Island for Windows, written in Rust and Slint.";
-                        }
-                        Row {
-                            name: "Memory";
-                            desc: root.memory-text;
-                        }
-                        Row {
-                            name: "Lyrics";
-                            desc: "Synced lyrics come from LRCLIB (lrclib.net), a free, open lyrics database.";
-                        }
-                    }
-                }
-            }
-        }
-
-        // Save bar: always there, so it's clear when changes are waiting.
-        Rectangle {
-            height: 64px;
-            background: root.close-warn ? (S.dark ? #2b2310 : #fff4ce) : S.surface-200;
-            animate background { duration: S.quick; }
-            Rectangle { y: 0; height: 1px; background: S.hairline; }
-            HorizontalLayout {
-                padding-left: 32px;
-                padding-right: 24px;
-                spacing: 8px;
-                alignment: stretch;
+              // A thin scrollbar on the right when the page is taller than the
+              // window: it shows there's more below, and its thumb can be dragged.
+              if pagebox.over > 1px : Rectangle {
+                x: parent.width - 14px;
+                y: 6px;
+                width: 14px;
+                height: parent.height - 12px;
+                property <length> thumb-h: max(36px, self.height * page.height / page.content-height);
+                property <bool> hot: drag.has-hover || drag.pressed;
                 Rectangle {
-                    width: 8px;
+                    x: parent.hot ? 4px : 6px;
+                    width: parent.hot ? 7px : 4px;
+                    height: parent.thumb-h;
+                    y: (parent.height - parent.thumb-h) * max(0, min(1, -page.content-y / pagebox.over));
+                    border-radius: self.width / 2;
+                    background: S.ink.with-alpha(drag.pressed ? 0.5 : parent.hot ? 0.38 : 0.24);
+                    animate x, width { duration: S.instant; }
+                }
+                drag := TouchArea {
+                    property <length> start-y;
+                    pointer-event(e) => {
+                        if e.kind == PointerEventKind.down {
+                            self.start-y = page.content-y;
+                        }
+                    }
+                    moved => {
+                        if self.pressed {
+                            page.content-y = max(-pagebox.over, min(0px, self.start-y - (self.mouse-y - self.pressed-y) * pagebox.over / max(1px, parent.height - parent.thumb-h)));
+                        }
+                    }
+                }
+              }
+            }
+
+            // Save bar: always there, so it's clear when changes are waiting.
+            Rectangle {
+                height: 60px;
+                background: root.close-warn ? (S.dark || S.glass ? #2b2310 : #fff4ce) : S.surface-100;
+                animate background { duration: S.quick; }
+                Rectangle { y: 0; height: 1px; background: S.hairline; }
+                // the buttons end where the cards do (cards stop at 720 px wide)
+                HorizontalLayout {
+                    width: min(parent.width, 720px + 64px);
+                    padding-left: 32px;
+                    padding-right: 32px;
+                    spacing: 8px;
+                    alignment: stretch;
                     Rectangle {
-                        y: (parent.height - self.height) / 2;
                         width: 8px;
-                        height: 8px;
-                        border-radius: 4px;
-                        background: root.dirty ? S.orange : root.save-state == 2 ? #e5484d : S.positive;
-                        opacity: root.dirty || root.save-state != 0 ? 1 : 0;
+                        Rectangle {
+                            y: (parent.height - self.height) / 2;
+                            width: 8px;
+                            height: 8px;
+                            border-radius: 4px;
+                            background: root.dirty ? S.orange : root.save-state == 2 ? #e5484d : S.positive;
+                            opacity: root.dirty || root.save-state != 0 ? 1 : 0;
+                        }
                     }
-                }
-                VerticalLayout {
-                    horizontal-stretch: 1;
-                    alignment: center;
-                    spacing: 2px;
-                    Text {
-                        text: root.save-state == 2 ? "Couldn't save"
-                            : root.close-warn ? "Save your changes before closing?"
-                            : root.dirty ? "You have unsaved changes"
-                            : root.save-state == 1 ? "All changes saved"
-                            : "No changes";
-                        font-size: 14px;
-                        font-weight: 600;
-                        color: S.ink;
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        alignment: center;
+                        spacing: 2px;
+                        Text {
+                            text: root.save-state == 2 ? "Couldn't save"
+                                : root.close-warn ? "Save your changes before closing?"
+                                : root.dirty ? "You have unsaved changes"
+                                : root.save-state == 1 ? "All changes saved"
+                                : "No changes";
+                            // a plain status until there's something to act on
+                            property <bool> quiet: !root.dirty && !root.close-warn && root.save-state == 0;
+                            font-size: 13px;
+                            font-weight: self.quiet ? 400 : 600;
+                            color: self.quiet ? S.ink-muted : S.ink;
+                        }
+                        Text {
+                            text: root.save-state == 2 ? root.save-msg
+                                : root.close-warn ? "Save keeps them, Discard puts the old settings back. Either one closes the window."
+                                : root.dirty ? "They take effect when you press Save."
+                                : root.save-msg;
+                            visible: self.text != "";
+                            font-size: 12px;
+                            color: root.save-state == 2 ? (S.dark || S.glass ? #ff9592 : #ce2c31) : S.ink-muted;
+                            overflow: elide;
+                        }
                     }
-                    Text {
-                        text: root.save-state == 2 ? root.save-msg
-                            : root.close-warn ? "Save keeps them, Discard puts the old settings back. Either one closes the window."
-                            : root.dirty ? "They take effect when you press Save."
-                            : root.save-msg;
-                        visible: self.text != "";
-                        font-size: 12px;
-                        color: root.save-state == 2 ? (S.dark ? #ff9592 : #ce2c31) : S.ink-muted;
-                        overflow: elide;
+                    VerticalLayout {
+                        alignment: center;
+                        Button {
+                            text: "Discard";
+                            enabled: root.dirty;
+                            clicked => { root.discard-changes(); }
+                        }
                     }
-                }
-                Button {
-                    y: 16px;
-                    text: "Discard";
-                    enabled: root.dirty;
-                    clicked => { root.discard-changes(); }
-                }
-                Button {
-                    y: 16px;
-                    text: "Save";
-                    primary: true;
-                    enabled: root.dirty;
-                    clicked => { root.save-changes(); }
+                    VerticalLayout {
+                        alignment: center;
+                        Button {
+                            text: "Save";
+                            primary: true;
+                            enabled: root.dirty;
+                            clicked => { root.save-changes(); }
+                        }
+                    }
                 }
             }
-        }
         }
     }
 }

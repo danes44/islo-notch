@@ -31,12 +31,17 @@ pub struct Backdrop {
     rgb: Vec<[u8; 3]>,
 }
 
-/// Frost (blur) of the captured screen, in logical px (the design's 3.1 / 1.7, between).
-const FROST: f32 = 2.6;
+/// Frost (blur) at 100% in Settings, in logical px. The default 40% is 2.6 px
+/// (the design's 3.1 / 1.7, between).
+const FROST_MAX: f32 = 6.5;
+/// Brightest the glass gets under white ink, as light (relative luminance):
+/// white text on it is at least (1 + 0.05) / (0.16 + 0.05) = 5:1, and just
+/// over 4.5:1 under the brightest pages.
+const WHITE_INK_MAX: f32 = 0.16;
 
 /// Copy the screen rectangle (physical px) without the `ours` windows, and
-/// frost it. `scale` = DPI scale.
-pub fn capture(x: i32, y: i32, w: i32, h: i32, scale: f32, ours: &[HWND]) -> Option<Backdrop> {
+/// frost it by `frost` (0..1 of FROST_MAX). `scale` = DPI scale.
+pub fn capture(x: i32, y: i32, w: i32, h: i32, scale: f32, frost: f32, ours: &[HWND]) -> Option<Backdrop> {
     if w <= 0 || h <= 0 {
         return None;
     }
@@ -56,9 +61,11 @@ pub fn capture(x: i32, y: i32, w: i32, h: i32, scale: f32, ours: &[HWND]) -> Opt
     }
     let mut rgb = out?;
     // three box blurs in a row look like a Gaussian blur
-    let r = ((FROST * scale) * 0.85).round().max(1.0) as usize;
-    for _ in 0..3 {
-        box_blur(&mut rgb, w as usize, h as usize, r);
+    let r = (FROST_MAX * frost.clamp(0.0, 1.0) * scale * 0.85).round() as usize;
+    if r > 0 {
+        for _ in 0..3 {
+            box_blur(&mut rgb, w as usize, h as usize, r);
+        }
     }
     Some(Backdrop { w: w as usize, h: h as usize, rgb })
 }
@@ -220,10 +227,14 @@ impl Backdrop {
                 // White ink: bright pages behind are toned down (a soft knee above
                 // 45% brightness), so white text and controls stay readable over
                 // a white page while dark areas keep their clear glass look.
+                // The cap is on light (not on the gamma value), so a bright saturated
+                // color such as yellow is held down too: white on it keeps about
+                // 4.5:1. Squares stand in for the 2.2 gamma (cheap, close enough).
                 if !dark_ink {
-                    let pl = 0.2126 * cr + 0.7152 * cg + 0.0722 * cb;
-                    if pl > 0.45 {
-                        let k = (0.45 + (pl - 0.45) * 0.3) / pl;
+                    (cr, cg, cb) = (cr.clamp(0.0, 1.0), cg.clamp(0.0, 1.0), cb.clamp(0.0, 1.0));
+                    let lin = 0.2126 * cr * cr + 0.7152 * cg * cg + 0.0722 * cb * cb;
+                    if lin > WHITE_INK_MAX {
+                        let k = ((WHITE_INK_MAX + (lin - WHITE_INK_MAX) * 0.02) / lin).sqrt();
                         cr *= k;
                         cg *= k;
                         cb *= k;
@@ -304,6 +315,23 @@ mod tests {
         let buf = out.image.to_rgba8().expect("rgba");
         let mid = buf.as_slice()[18 * 40 + 3];
         assert!(mid.r > mid.b, "left rim should bend red in from outside: {mid:?}");
+    }
+
+    /// White ink stays readable over bright pages of any color, tinted glass too.
+    #[test]
+    fn white_ink_keeps_its_contrast() {
+        let lin = |c: u8| {
+            let c = c as f32 / 255.0;
+            if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+        };
+        for (bg, tint) in [([255, 255, 255], 0x4f7cff), ([255, 255, 0], 0xffffff), ([0, 255, 255], 0xffffff), ([255, 120, 200], 0xffffff), ([120, 255, 120], 0xfc90bc)] {
+            let out = flat(300, 120, bg).render(40.0, 20.0, 220.0, 36.0, 18.0, 1.0, tint, false);
+            let buf = out.image.to_rgba8().expect("rgba");
+            let p = buf.as_slice()[18 * 220 + 110];
+            let l = 0.2126 * lin(p.r) + 0.7152 * lin(p.g) + 0.0722 * lin(p.b);
+            let contrast = 1.05 / (l + 0.05);
+            assert!(contrast >= 4.5, "white on glass over {bg:?} (tint {tint:06x}): {contrast:.2}");
+        }
     }
 
     #[test]

@@ -536,9 +536,10 @@ impl App {
             return String::new();
         }
         let n = self.panels(v).len();
-        let tabs = if n > 1 { n as f32 * 28.0 } else { 0.0 };
+        let tabs = if n > 1 { n as f32 * 30.0 } else { 0.0 };
         let ring = if self.cfg.battery && self.battery.present && v.panel != P_POWER { 26.0 } else { 0.0 };
-        let room = EXPANDED_W - 2.0 * PAD - tabs - ring - 2.0 * 28.0 - 8.0;
+        // pin and settings (30 px each) and the 8 px between them and the clock
+        let room = EXPANDED_W - 2.0 * PAD - tabs - ring - 2.0 * 30.0 - 8.0 - 8.0;
         fit_clock(self.cfg.clock, &self.time_text, &self.date_text, room)
     }
 
@@ -1669,7 +1670,7 @@ impl App {
             P_LYRICS => 228.0,
             P_NOTIF => self.visible_notes().len().clamp(1, 3) as f32 * 64.0 + 40.0,
             P_PET => 92.0 + if self.pet_list_open { 12.0 + self.nearby().len().clamp(1, 2) as f32 * 40.0 } else { 0.0 },
-            _ if self.media_visible() => 130.0 + self.media_list_h(),
+            _ if self.media_visible() => self.media_panel_h(),
             _ => 80.0,
         };
         PAD + header + content + PAD
@@ -1769,23 +1770,31 @@ impl App {
 
     // ---------------- looks (1.0) ----------------
 
-    /// The island's `T.look`: 0 dark, 1 light, 2 Liquid Glass. "Use Windows
-    /// setting" follows Windows' app mode. In the taskbar Liquid Glass would
-    /// have to be a notch, which stays solid, so it shows dark there.
-    fn look(&self) -> i32 {
-        match self.cfg.theme {
-            3 if self.cfg.taskbar => 0,
-            3 => 2,
-            1 => 1,
-            2 => 0,
-            _ if system::apps_dark_mode() => 0,
-            _ => 1,
+    /// Settings > Mode: dark? "Auto" follows Windows' app mode.
+    fn mode_dark(theme: i32) -> bool {
+        match theme {
+            1 => false,
+            2 => true,
+            _ => system::apps_dark_mode(),
         }
     }
 
-    /// Dynamic pill chosen (Liquid Glass is always one); the taskbar keeps the notch.
+    /// The island's `T.look`: 0 Classic dark, 1 Classic light, 2 Liquid Glass,
+    /// 3 Soft Bento light, 4 Soft Bento dark. In the taskbar Liquid Glass would
+    /// have to be a notch, which stays solid, so it shows dark there.
+    fn look(&self) -> i32 {
+        let dark = Self::mode_dark(self.cfg.theme);
+        match self.cfg.look {
+            1 if self.cfg.taskbar => 0,
+            1 => 2,
+            2 => if dark { 4 } else { 3 },
+            _ => if dark { 0 } else { 1 },
+        }
+    }
+
+    /// Dynamic pill chosen (Liquid Glass and Soft Bento are always one); the taskbar keeps the notch.
     fn pill_style(&self) -> bool {
-        !self.cfg.taskbar && (self.cfg.island_style == 1 || self.cfg.theme == 3)
+        !self.cfg.taskbar && (self.cfg.island_style == 1 || self.cfg.look != 0)
     }
 
     /// How far this island floats off the screen edge (top and bottom edges only;
@@ -1795,17 +1804,23 @@ impl App {
     }
 
     /// Live Liquid Glass: on, unless Still is picked, Windows transparency is off,
-    /// or battery saver is on.
+    /// or battery saver is on (when Settings says to switch then).
     fn glass_live(&self) -> bool {
         // (same as look() == 2, without reading the registry)
-        self.cfg.theme == 3 && !self.cfg.taskbar && self.cfg.glass_live && self.transparency && !self.battery.saver
+        self.cfg.look == 1
+            && !self.cfg.taskbar
+            && self.cfg.glass_live
+            && self.transparency
+            && !(self.cfg.glass_saver && self.battery.saver)
     }
 
     /// Push the look to every island, and start or stop live glass.
     fn push_look(&mut self) {
         let look = self.look();
         for v in &self.views {
-            v.island.global::<IslandTheme>().set_look(look);
+            let t = v.island.global::<IslandTheme>();
+            t.set_look(look);
+            t.set_rose_accent(self.cfg.accent == 1);
         }
         self.update_glass();
     }
@@ -1841,10 +1856,11 @@ impl App {
         }
         let (ww, wh) = self.win_size(&self.views[i]);
         let ours: Vec<HWND> = self.views.iter().map(|v| v.win.hwnd()).collect();
+        let frost = self.cfg.glass_frost as f32 / 100.0;
         let v = &mut self.views[i];
         let s = v.win.scale();
         let (x, y) = v.win.pos();
-        v.backdrop = glass::capture(x, y, (ww * s).ceil() as i32, (wh * s).ceil() as i32, s, &ours);
+        v.backdrop = glass::capture(x, y, (ww * s).ceil() as i32, (wh * s).ceil() as i32, s, frost, &ours);
         self.render_glass(i);
     }
 
@@ -2116,7 +2132,7 @@ impl App {
         isl.set_has_art(self.media.as_ref().is_some_and(|m| m.info.art.is_some()));
         isl.set_accent(self.shown_accent());
         if let Some(m) = &self.media {
-            isl.set_track_title(m.info.title.clone().into());
+            isl.set_track_title(shown_title(&m.info.title, &m.info.artist).into());
             isl.set_subtitle(subtitle(&m.info).into());
             isl.set_playing(m.info.playing);
             isl.set_has_timeline(m.info.timeline.is_some());
@@ -2269,12 +2285,17 @@ impl App {
     }
 
     fn apply_visibility(&mut self) {
+        let was_shown = self.any_shown();
         for v in &mut self.views {
             let want = !self.hidden_user && !v.hidden_fullscreen;
             if want != v.shown {
                 v.shown = want;
                 let _ = if want { v.island.show() } else { v.island.hide() };
             }
+        }
+        // while hidden the clock only wakes at midnight: catch up and re-arm the minute tick
+        if self.any_shown() != was_shown {
+            self.refresh_date();
         }
         self.update_wave();
         // hidden (full screen, games): no peeks, no pointer hook, no glass capture
@@ -3447,8 +3468,7 @@ impl App {
                     self.art_id = info.art_id;
                     match &info.art {
                         Some(art) => {
-                            let px = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(&art.rgba, media::ART_SIZE, media::ART_SIZE);
-                            self.art = slint::Image::from_rgba8(px);
+                            self.art = rounded_art(&art.rgba, media::ART_SIZE);
                             let [r, g, b] = art.accent;
                             self.accent = slint::Color::from_rgb_u8(r, g, b);
                         }
@@ -3464,7 +3484,7 @@ impl App {
                         isl.set_accent(accent);
                     });
                 }
-                let (title, sub) = (info.title.clone(), subtitle(&info));
+                let (title, sub) = (shown_title(&info.title, &info.artist), subtitle(&info));
                 let (playing, timeline) = (info.playing, info.timeline.is_some());
                 let volume = info.volume.unwrap_or(-1.0);
                 self.each(|isl| {
@@ -3525,10 +3545,7 @@ impl App {
             .map(|e| {
                 let art = match self.thumbs.iter().find(|t| t.0 == e.id && t.1 == e.art_id) {
                     Some(t) => t.2.clone(),
-                    None => e.art.as_ref().map_or_else(slint::Image::default, |rgba| {
-                        let px = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(rgba, media::THUMB, media::THUMB);
-                        slint::Image::from_rgba8(px)
-                    }),
+                    None => e.art.as_ref().map_or_else(slint::Image::default, |rgba| rounded_art(rgba, media::THUMB)),
                 };
                 thumbs.push((e.id, e.art_id, art.clone()));
                 let status = if e.playing { "Playing" } else { "Paused" };
@@ -3537,7 +3554,7 @@ impl App {
                     sub = format!("{sub} · {}", e.artist);
                 }
                 MediaRow {
-                    title: if e.title.is_empty() { e.artist.clone().into() } else { e.title.clone().into() },
+                    title: if e.title.is_empty() { e.artist.clone().into() } else { shown_title(&e.title, &e.artist).into() },
                     sub: sub.into(),
                     playing: e.playing,
                     art,
@@ -3557,6 +3574,25 @@ impl App {
 
     /// Height under the player: its app's volume, then up to two rows of the
     /// other media (the rest scroll). Must match the media panel in island.slint.
+    /// Height of the open player. Must match `media-h` in island.slint: without a
+    /// timeline the controls move up (22 px); Soft Bento puts the player on a tile
+    /// 8 px under the header with 12 px under the play button, and when nothing
+    /// follows the tile ends 8 px from the island's edge.
+    fn media_panel_h(&self) -> f32 {
+        let lift = if self.media.as_ref().is_some_and(|m| m.info.timeline.is_some()) { 0.0 } else { 22.0 };
+        let soft = matches!(self.look(), 3 | 4);
+        let has_volume = self.media.as_ref().is_some_and(|m| m.info.volume.is_some());
+        if !soft {
+            return 130.0 - lift + self.media_list_h();
+        }
+        let tile_bottom = 90.0 - lift + 6.0 + 40.0 + 12.0;
+        if !has_volume && self.media_list.is_empty() {
+            tile_bottom - 8.0
+        } else {
+            tile_bottom + 2.0 + self.media_list_h()
+        }
+    }
+
     fn media_list_h(&self) -> f32 {
         let volume = if self.media.as_ref().is_some_and(|m| m.info.volume.is_some()) { 30.0 } else { 0.0 };
         volume
@@ -3901,24 +3937,27 @@ impl App {
 
     // ---------------- settings ----------------
 
-    fn settings_dark(&self) -> bool {
-        // the window previews its own theme before Save, so go by what it shows
-        let theme = self.settings.as_ref().map_or(self.cfg.theme, |s| s.get_theme());
-        match theme {
-            1 => false,
-            2 | 3 => true, // Liquid Glass: a dark window with the tint as accent
-            _ => system::apps_dark_mode(),
-        }
+    /// Does the Settings window wear Liquid Glass? (It previews its own theme
+    /// before Save, so this goes by what it shows.)
+    fn settings_glass(&self) -> bool {
+        self.settings.as_ref().map_or(self.cfg.look == 1 && self.cfg.glass_window, |s| s.get_look() == 1 && s.get_glass_window())
     }
 
-    /// Dress the Settings window for what it shows: light, dark, or glass
-    /// (dark, with the glass tint as accent), title bar included.
+    fn settings_dark(&self) -> bool {
+        // Liquid Glass: a dark window with the tint as accent
+        self.settings_glass() || Self::mode_dark(self.settings.as_ref().map_or(self.cfg.theme, |s| s.get_theme()))
+    }
+
+    /// Dress the Settings window for what it shows: Classic light or dark, Soft
+    /// Bento light or dark, or glass (dark, with the glass tint as accent),
+    /// title bar included.
     fn style_settings(&self) {
         let Some(s) = &self.settings else { return };
         let dark = self.settings_dark();
         s.set_dark(dark);
-        let glass = s.get_theme() == 3;
+        let glass = self.settings_glass();
         s.set_glass_ui(glass);
+        s.set_soft_ui(!glass && s.get_look() == 2);
         // the tint as accent; one too dark to see on the dark window falls back to white
         let t = rgb_u32(s.get_glass_tint());
         let l = (0.2126 * ((t >> 16) & 0xff) as f32 + 0.7152 * ((t >> 8) & 0xff) as f32 + 0.0722 * (t & 0xff) as f32) / 255.0;
@@ -3995,6 +4034,13 @@ impl App {
                 }
                 with_app(|a| a.close_settings());
                 slint::CloseRequestResponse::HideWindow
+            });
+            let weak = s.as_weak();
+            s.on_search(move |q| {
+                if let Some(s) = weak.upgrade() {
+                    let hits: Vec<bool> = settings_search(q.as_str()).to_vec();
+                    s.set_nav_hit(slint::ModelRc::new(slint::VecModel::from(hits)));
+                }
             });
             self.settings = Some(s);
             self.push_settings();
@@ -4081,7 +4127,7 @@ impl App {
             let (_, body, eyes) = pet::SKINS[(s.get_pet_skin() as usize).min(pet::SKINS.len() - 1)];
             push_pet_colors(s, body, eyes);
         }
-        if key == "theme" || key == "tint" || key == "defaults" {
+        if matches!(key, "theme" | "look" | "tint" | "accent" | "glasswin" | "defaults") {
             // this window previews its theme right away
             self.style_settings();
         }
@@ -4138,7 +4184,9 @@ impl App {
     /// After a save: do what each changed setting needs, then refresh everything.
     fn apply_changes(&mut self, old: &Config) {
         let c = self.cfg.clone();
-        if c.theme != old.theme || c.glass_tint != old.glass_tint || c.reduce_motion != old.reduce_motion {
+        if (c.theme, c.look, c.accent, c.glass_window, c.glass_tint, c.reduce_motion)
+            != (old.theme, old.look, old.accent, old.glass_window, old.glass_tint, old.reduce_motion)
+        {
             if let Some(s) = &self.settings {
                 s.set_reduce_ui(self.reduce_motion());
             }
@@ -4440,7 +4488,7 @@ impl App {
     fn open_about(&mut self) {
         self.open_settings();
         if let Some(s) = &self.settings {
-            s.set_page(4);
+            s.set_page(10);
         }
     }
 
@@ -4481,6 +4529,10 @@ impl App {
             WM_POWERBROADCAST => {
                 if wp.0 as u32 == PBT_POWERSETTINGCHANGE || wp.0 as u32 == PBT_APMPOWERSTATUSCHANGE {
                     self.on_power(false);
+                }
+                // back from sleep: the minute timer slept with the PC, so the clock is behind
+                if wp.0 as u32 == PBT_APMRESUMEAUTOMATIC || wp.0 as u32 == PBT_APMRESUMESUSPEND {
+                    self.refresh_date();
                 }
                 Some(LRESULT(1))
             }
@@ -4581,6 +4633,54 @@ impl App {
     }
 }
 
+/// Album art with rounded corners. Slint's software renderer clips only to
+/// rectangles, so a cover placed in a rounded frame would still show square
+/// corners: the corners are cut out of the picture itself (soft, one pixel of
+/// anti-aliasing). The radius is a quarter of the side, the frames' shape
+/// (56 px cover / 14 px corner, 40 / 10, 32 / 8).
+fn rounded_art(rgba: &[u8], size: u32) -> slint::Image {
+    let mut px = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(rgba, size, size);
+    let n = size as usize;
+    let r = size as f32 * 0.25;
+    let buf = px.make_mut_slice();
+    for y in 0..n {
+        for x in 0..n {
+            // distance from this pixel's center into the nearest corner's circle
+            let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+            let cx = if fx < r { r } else if fx > n as f32 - r { n as f32 - r } else { continue };
+            let cy = if fy < r { r } else if fy > n as f32 - r { n as f32 - r } else { continue };
+            let d = ((fx - cx).powi(2) + (fy - cy).powi(2)).sqrt();
+            let cover = (r - d + 0.5).clamp(0.0, 1.0);
+            let p = &mut buf[y * n + x];
+            p.a = (p.a as f32 * cover + 0.5) as u8;
+        }
+    }
+    slint::Image::from_rgba8(px)
+}
+
+/// The title as shown. Browser videos are often named "Artist - Song" while the
+/// artist already shows on the line below, so the repeated "Artist - " is dropped
+/// and the song name gets the room.
+fn shown_title(title: &str, artist: &str) -> String {
+    let artist = artist.trim();
+    if artist.is_empty() || title.len() <= artist.len() || !title.is_char_boundary(artist.len()) {
+        return title.to_string();
+    }
+    let (head, rest) = title.split_at(artist.len());
+    if head.to_lowercase() != artist.to_lowercase() {
+        return title.to_string();
+    }
+    for sep in [" - ", " \u{2013} ", " \u{2014} ", ": ", " | "] {
+        if let Some(song) = rest.strip_prefix(sep) {
+            let song = song.trim();
+            if !song.is_empty() {
+                return song.to_string();
+            }
+        }
+    }
+    title.to_string()
+}
+
 fn subtitle(info: &media::Info) -> String {
     match (info.artist.is_empty(), info.app.is_empty()) {
         (false, false) => format!("{} · {}", info.artist, info.app),
@@ -4636,9 +4736,14 @@ fn fill_settings(s: &SettingsWindow, c: &Config) {
     s.set_hover_expand(c.hover_expand);
     s.set_hover_delay(c.hover_delay as f32);
     s.set_theme(c.theme);
+    s.set_look(c.look);
+    s.set_accent_pick(c.accent);
     s.set_island_style(c.island_style);
     push_glass_tint(s, c.glass_tint);
     s.set_glass_live(c.glass_live);
+    s.set_glass_frost(c.glass_frost as f32);
+    s.set_glass_window(c.glass_window);
+    s.set_glass_saver(c.glass_saver);
     s.set_reduce_motion(c.reduce_motion);
     s.set_show_on(c.show_on);
     s.set_pill_glance(c.pill_glance);
@@ -4682,6 +4787,27 @@ fn fill_settings(s: &SettingsWindow, c: &Config) {
 
 /// Mochi's body and eye colors into the settings window, with the hints that go with them.
 /// Settings > Theme > Glass tint: the color, and whether it's one of the dots.
+/// Settings' search: which of the 11 pages have a page name or a setting that
+/// matches every word typed (any case). Empty shows them all.
+fn settings_search(query: &str) -> [bool; 11] {
+    const PAGES: [&str; 11] = [
+        "general startup start with windows open settings check for updates automatically restore default settings quit islo",
+        "appearance theme classic liquid glass soft bento mode auto light dark glass tint glass effects live still frost blur glass in this window switch to still on battery saver accent indigo rose island style notch dynamic pill soft shadow reduce animations",
+        "island position edge top bottom left right reset inside the taskbar on the left or right edge icon tab thin sliver full pill show on display monitor pointer behavior island width expand on hover hover delay keep the island open pin",
+        "at a glance quiet pill clock and battery in the pill featured on the left show on the right date open island clock in the open island",
+        "media & lyrics music media controls colors from album art rest after music pauses volume and brightness lyrics lyric lines lyrics alignment",
+        "live activity battery and charging file shelf files timers mic and camera privacy focus notifications",
+        "mochi pet your pet name look body color eye color size come out of the island what mochi does peek walk how often eyes follow the pointer pet and carry friends visit friends nearby bluetooth show my name",
+        "games tic-tac-toe tic tac toe online games room code",
+        "full screen & power full-screen apps hide in full-screen apps games videos power pause animations on battery saver",
+        "shortcuts keyboard and mouse open or close the island close the island esc change volume scroll move the island drag win alt",
+        "about islo version updates release notes what it is memory lyrics lrclib",
+    ];
+    let q = query.to_lowercase();
+    let words: Vec<&str> = q.split_whitespace().collect();
+    PAGES.map(|text| words.iter().all(|w| text.contains(w)))
+}
+
 fn push_glass_tint(s: &SettingsWindow, tint: u32) {
     const DOTS: [u32; 5] = [0xffffff, 0x1482ff, 0xec488c, 0x1ebe96, 0x282830];
     s.set_glass_tint(rgb(tint));
@@ -4737,10 +4863,15 @@ fn read_settings(s: &SettingsWindow, c: &mut Config) {
     c.side_style = s.get_side_style().clamp(0, 2);
     c.hover_expand = s.get_hover_expand();
     c.hover_delay = s.get_hover_delay().clamp(100.0, 1000.0) as u32;
-    c.theme = s.get_theme().clamp(0, 3);
+    c.theme = s.get_theme().clamp(0, 2);
+    c.look = s.get_look().clamp(0, 2);
+    c.accent = s.get_accent_pick().clamp(0, 1);
     c.island_style = s.get_island_style().clamp(0, 1);
     c.glass_tint = rgb_u32(s.get_glass_tint());
     c.glass_live = s.get_glass_live();
+    c.glass_frost = (s.get_glass_frost().round() as i32).clamp(0, 100);
+    c.glass_window = s.get_glass_window();
+    c.glass_saver = s.get_glass_saver();
     c.reduce_motion = s.get_reduce_motion();
     c.show_on = s.get_show_on().clamp(0, 2);
     c.pill_glance = s.get_pill_glance();
@@ -5361,6 +5492,34 @@ mod tests {
         });
     }
 
+    /// Covers lose their corners (transparent), keep their middle and edges.
+    #[test]
+    fn art_corners_are_cut_round() {
+        let rgba = vec![200u8; 96 * 96 * 4];
+        let img = rounded_art(&rgba, 96);
+        let buf = img.to_rgba8().expect("rgba");
+        let a = |x: usize, y: usize| buf.as_slice()[y * 96 + x].a;
+        assert_eq!(a(0, 0), 0, "top-left corner");
+        assert_eq!(a(95, 95), 0, "bottom-right corner");
+        assert_eq!(a(48, 48), 200, "middle keeps its own alpha");
+        assert_eq!(a(48, 0), 200, "the top edge's middle stays");
+        assert_eq!(a(0, 48), 200, "the left edge's middle stays");
+        assert!(a(4, 4) < 120, "inside the corner's curve: mostly cut");
+    }
+
+    /// A browser title that repeats the artist loses the repeat; others stay whole.
+    #[test]
+    fn titles_drop_a_repeated_artist() {
+        assert_eq!(shown_title("Echa Soemantri - Rossa - Terlalu Cinta", "Echa Soemantri"), "Rossa - Terlalu Cinta");
+        assert_eq!(shown_title("ADELE \u{2013} Hello (Official)", "Adele"), "Hello (Official)");
+        assert_eq!(shown_title("Hello", "Adele"), "Hello");
+        assert_eq!(shown_title("Adele", "Adele"), "Adele");
+        assert_eq!(shown_title("Adele - ", "Adele"), "Adele - ");
+        assert_eq!(shown_title("Adeleine - Song", "Adele"), "Adeleine - Song");
+        assert_eq!(shown_title("\u{dc}nal - \u{15e}ark\u{131}", "\u{fc}nal"), "\u{15e}ark\u{131}");
+        assert_eq!(shown_title("Song", ""), "Song");
+    }
+
     /// Every clock choice shows something in the header, shortening as tabs take the room.
     #[test]
     fn header_clock_shortens_instead_of_vanishing() {
@@ -5372,6 +5531,19 @@ mod tests {
         assert_eq!(fit_clock(2, t, d, 62.0), "28 Oct"); // 7 tabs: the full date doesn't fit
         assert_eq!(fit_clock(0, t, d, 62.0), "23:13");
         assert_eq!(fit_clock(0, t, d, 10.0), "");
+    }
+
+    /// Settings search finds pages by their settings, not only their names.
+    #[test]
+    fn settings_search_finds_pages_by_what_is_on_them() {
+        assert!(settings_search("").iter().all(|&h| h));
+        let hits = settings_search("frost");
+        assert_eq!(hits.iter().filter(|&&h| h).count(), 1);
+        assert!(hits[1]); // Appearance
+        assert!(settings_search("  TASKBAR ")[2]); // Island, any case and spacing
+        let both = settings_search("battery");
+        assert!(both[3] && both[5] && both[8]); // At a glance, Live activity, Full screen & power
+        assert!(settings_search("zzz").iter().all(|&h| !h));
     }
 
     /// Settings: what goes into the window comes back out on Save, also after
@@ -5387,6 +5559,11 @@ mod tests {
             hover_expand: false,
             hover_delay: 750,
             theme: 1,
+            look: 2,
+            accent: 1,
+            glass_frost: 65,
+            glass_window: false,
+            glass_saver: false,
             show_on: 1,
             featured: 2,
             clock: 0,
@@ -5412,10 +5589,17 @@ mod tests {
         let w = LAST.with(|l| l.borrow().clone()).expect("window adapter");
         paint(&w);
         fill_settings(&s, &c);
-        for page in [0, 1, 2, 3, 4, 1, 2, 0] {
+        for page in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1, 2, 0] {
             s.set_page(page);
             paint(&w);
         }
+        // and the Appearance page in each theme (its groups come and go)
+        s.set_page(1);
+        for look in [0, 1, 2, 0] {
+            s.set_look(look);
+            paint(&w);
+        }
+        s.set_look(c.look);
         let mut back = Config::default();
         back.edge_pos = c.edge_pos;
         back.monitor = c.monitor;

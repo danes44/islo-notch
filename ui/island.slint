@@ -8,24 +8,33 @@
 import { Icon, LineIcon, Icons, Mochi } from "icons.slint";
 
 // ---- design tokens (island-* are fixed: the island is always dark) ----
-// The island's colors. Rust sets `look` from Settings > Theme:
-// 0 dark (the classic black island), 1 light, 2 Liquid Glass. Glass picks dark
-// ink over a bright backdrop (`glass-dark-ink`, measured in Rust), so its
-// tokens follow `light` from there on.
+// The island's colors. Rust sets `look` from Settings > Theme and Mode:
+// 0 Classic dark (the black island), 1 Classic light, 2 Liquid Glass,
+// 3 Soft Bento light, 4 Soft Bento dark. Glass picks dark ink over a bright
+// backdrop (`glass-dark-ink`, measured in Rust), so its tokens follow `light`
+// from there on.
 export global T {
     in property <int> look: 0;
     in property <bool> glass-dark-ink: false;
+    in property <bool> rose-accent: false; // Soft Bento accent: rose instead of indigo
     // Liquid Glass while no live image is under it (Still glass, battery saver)
     in property <color> glass-fill: #18181e9e;
     out property <bool> glass: look == 2;
-    out property <bool> light: look == 1 || (look == 2 && glass-dark-ink);
-    out property <color> bg: look == 1 ? #f7f7f9 : look == 2 ? transparent : #000000;
-    out property <color> tile: light ? #00000012 : glass ? #ffffff26 : #1c1c1c;
-    out property <color> tile-hover: light ? #0000001f : glass ? #ffffff3d : #2a2a2a;
-    out property <color> tile-press: light ? #0000002e : glass ? #ffffff52 : #3a3a3a;
-    out property <color> hairline: light ? #00000024 : glass ? #ffffff38 : #2a2a2a;
-    out property <color> ink: light ? #141414 : glass ? #ffffff : #f5f5f5;
-    out property <color> muted: light ? #5a5a5e : glass ? #ffffffc7 : #a3a3a3;
+    // Soft Bento: rounded tiles on one calm surface, each edged in glass
+    out property <bool> soft: look == 3 || look == 4;
+    out property <bool> light: look == 1 || look == 3 || (look == 2 && glass-dark-ink);
+    out property <color> bg: look == 1 ? #f7f7f9 : look == 2 ? transparent : look == 3 ? #f6f7fa : look == 4 ? #1e2029 : #000000;
+    out property <color> tile: soft ? (light ? #ffffff : #272a35) : light ? #00000012 : glass ? #ffffff26 : #1c1c1c;
+    out property <color> tile-hover: soft ? (light ? #eceff5 : #313542) : light ? #0000001f : glass ? #ffffff3d : #2a2a2a;
+    out property <color> tile-press: soft ? (light ? #e2e6ee : #3a3f4d) : light ? #0000002e : glass ? #ffffff52 : #3a3a3a;
+    out property <color> hairline: soft ? (light ? #e1e4ea : #2e3240) : light ? #00000024 : glass ? #ffffff38 : #2a2a2a;
+    out property <color> ink: soft ? (light ? #1d2230 : #eef0f5) : light ? #141414 : glass ? #ffffff : #f5f5f5;
+    out property <color> muted: soft ? (light ? #565c6c : #a2a7b5) : light ? #5a5a5e : glass ? #ffffffc7 : #a3a3a3;
+    // Soft Bento's accent: sliders, progress and the music bars when the album has no color
+    out property <color> accent: rose-accent ? (light ? #c2306f : #fc90bc) : (light ? #4f6bed : #8a9dff);
+    // a glass edge: lit at the top, a soft shade at the bottom
+    out property <color> edge-lit: light ? #e4e8ef : #ffffff38;
+    out property <color> edge-shade: light ? #c4cad7 : #ffffff0d;
     // feature hues: the design system's light-theme set on light grounds
     out property <color> rose: light ? #b54879 : #fc90bc;
     out property <color> orange: light ? #ab5e0c : #f99f55;
@@ -55,6 +64,27 @@ export struct NoteItem {
     call: bool,
     icon: image,
     has-icon: bool,
+}
+
+// Soft Bento's glass edge around a tile (fills its parent). The software
+// renderer draws only flat borders and no rounded gradients, so the edge is
+// five bands, each showing a slice of the same outline, from lit at the top
+// to a soft shade at the bottom.
+component GlassEdge inherits Rectangle {
+    in property <length> r;
+    for i in 5 : Rectangle {
+        y: root.height * i / 5;
+        height: root.height * (i + 1) / 5 - root.height * i / 5;
+        clip: true;
+        Rectangle {
+            y: -parent.y;
+            width: root.width;
+            height: root.height;
+            border-radius: root.r;
+            border-width: 1px;
+            border-color: T.edge-lit.mix(T.edge-shade, 1 - i / 4);
+        }
+    }
 }
 
 // A volume slider: drag or click to set, scroll to nudge. `value` follows the
@@ -138,7 +168,9 @@ component IslandButton inherits Rectangle {
     width: main ? 40px : 32px;
     height: self.width;
     border-radius: self.height / 2;
-    background: ta.pressed ? T.tile-hover : main ? (ta.has-hover ? T.tile-hover : T.tile) : (ta.has-hover ? T.tile-hover : transparent);
+    // Soft Bento: play is solid ink
+    property <bool> solid: main && T.soft;
+    background: solid ? (ta.pressed ? T.muted : T.ink) : ta.pressed ? T.tile-hover : main ? (ta.has-hover ? T.tile-hover : T.tile) : (ta.has-hover ? T.tile-hover : transparent);
     animate background { duration: reduce-motion ? 0ms : 90ms; }
 
     Icon {
@@ -147,7 +179,7 @@ component IslandButton inherits Rectangle {
         height: self.width;
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
-        fill: T.ink;
+        fill: root.solid ? T.bg : T.ink;
         animate width { duration: reduce-motion ? 0ms : 180ms; easing: ease-out-back; }
     }
 
@@ -369,8 +401,13 @@ component NavArrow inherits Rectangle {
     height: 26px;
     border-radius: 13px;
     background: ta.pressed && root.enabled ? T.tile-press : ta.has-hover && root.enabled ? T.tile-hover : T.tile;
+    // an outline so it reads as a button where it sits over a tile of the same color
+    border-width: 1px;
+    border-color: T.soft ? T.edge-shade : T.hairline;
     animate background { duration: 90ms; }
-    opacity: !root.shown ? 0 : root.enabled ? 1 : 0.35;
+    // no way to go: hidden, not faded (on the first tab, a faded arrow sat over
+    // the album cover's corner)
+    opacity: root.shown && root.enabled ? 1 : 0;
     animate opacity { duration: root.reduce-motion ? 0ms : 180ms; }
     visible: self.opacity > 0.01;
     Path {
@@ -583,7 +620,8 @@ component LyricChip inherits Rectangle {
     height: 24px;
     width: row.preferred-width;
     border-radius: 12px;
-    background: root.has && ta.has-hover ? T.tile-hover : T.tile;
+    // a tile only when it opens the lyrics; a plain status ("No lyrics") sits bare
+    background: !root.has ? transparent : ta.has-hover ? T.tile-hover : T.tile;
     animate background { duration: 90ms; }
     row := HorizontalLayout {
         padding-left: 8px;
@@ -742,7 +780,10 @@ export component Island inherits Window {
     in property <bool> has-art: false;
     in property <color> accent: T.rose;  // island-media: sampled from the artwork
     // on a light island the (bright) art color is darkened, and plain white becomes the ink
-    property <color> art-tint: !T.light ? root.accent : root.accent == #ffffff ? T.ink : root.accent.darker(0.6);
+    // (Soft Bento: its own accent while the album gives no color)
+    // Soft Bento: a white, gray or muddy cover color (olive, beige) would wash out on
+    // the tiles, so the theme's accent stands in for it
+    property <color> art-tint: T.soft && (root.accent == #ffffff || root.accent.to-hsv().saturation < 0.35) ? T.accent :!T.light ? root.accent : root.accent == #ffffff ? T.ink : root.accent.darker(0.6);
     in property <float> progress: 0;
     in property <string> elapsed: "";
     in property <string> duration: "";
@@ -848,6 +889,20 @@ export component Island inherits Window {
     property <duration> quick: root.reduce-motion ? 0ms : 180ms;
     property <duration> instant: root.reduce-motion ? 0ms : 90ms;
     property <bool> show-header: root.panels.length > 1 || root.header-date;
+    // The player's layout. Must match media_panel_h in app.rs.
+    // No timeline: the controls move up into its row.
+    property <length> media-lift: root.has-timeline ? 0px : 22px;
+    // Soft Bento: the player sits 8 px inside its tile (6 px lower than plain)
+    property <length> media-sp: T.soft ? 6px : 0px;
+    // Soft Bento's tile: 8 px under the header (content y -2), 12 px under the play button
+    property <length> media-tile-bottom: 90px - root.media-lift + root.media-sp + 40px + 12px;
+    // where the rows under the player (volume, other media) start from
+    property <length> media-base: T.soft ? root.media-tile-bottom + 2px : 130px - root.media-lift;
+    property <length> media-h: T.soft && root.media-volume < 0 && root.media-list.length == 0
+        ? root.media-tile-bottom - 8px // the tile is last: 8 px to the island's edge
+        : root.media-base + (root.media-volume >= 0 ? 30px : 0px) + (root.media-list.length > 0 ? 8px + min(root.media-list.length, 2) * 44px : 0px);
+    // the tab arrows sit over the content's right edge: the top row keeps clear of them
+    property <length> arrow-room: root.panels.length > 1 ? 20px : 0px;
     property <color> battery-tint: root.charging ? T.green : root.battery-level <= 20 ? T.red : T.ink;
 
     // ================= soft shadow =================
@@ -1033,10 +1088,14 @@ export component Island inherits Window {
             border-color: #ffffff4d;
         }
         // light themes: a hairline so a light island reads on a light page
-        if T.look == 1 : Rectangle {
+        if T.look == 1 || (T.soft && pill.flat) : Rectangle {
             border-radius: root.radius;
             border-width: 1px;
-            border-color: #0000000f;
+            border-color: T.soft && !T.light ? #ffffff14 : #0000000f;
+        }
+        // Soft Bento: a glass edge around the floating pill
+        if T.soft && !pill.flat : GlassEdge {
+            r: root.radius;
         }
 
         // Hit area under everything: press squish, click, right-click, scroll for volume.
@@ -1275,7 +1334,9 @@ export component Island inherits Window {
                             count: root.note-count;
                         }
                         // has this song got lyrics?
-                        if root.lyric-state != 0 && !root.in-taskbar : Rectangle {
+                        // shown only when the song has lyrics: a "no lyrics" mark this small
+                        // just looked like noise (the open island says it in words)
+                        if (root.lyric-state == 2 || root.lyric-state == 3) && !root.in-taskbar : Rectangle {
                             width: 14px;
                             LyricGlyph { y: 11px; state: root.lyric-state; tint: root.art-tint; }
                         }
@@ -1490,8 +1551,28 @@ export component Island inherits Window {
                     if root.visitor != "" : PetGlyph { y: 8px; width: 20px; height: 20px; awake: true; head: T.rose; tint: #000000; look: false; }
                     Label { text: root.compact-kind == 15 ? root.nearby-text : root.visitor != "" ? root.visitor : root.pet-name; overflow: elide; }
                 }
-                Muted {
-                    text: root.compact-kind == 15 ? "Say hi" : root.visitor != "" ? "Visiting" : root.pet-away ? "Away" : "Asleep";
+                // "Say hi" is something to do (open the island and wave), so it sits
+                // on a chip; the others are only status
+                if root.compact-kind == 15 : Rectangle {
+                    width: hi.preferred-width + 20px;
+                    Rectangle {
+                        y: (parent.height - self.height) / 2;
+                        height: 22px;
+                        border-radius: 11px;
+                        background: T.soft ? T.accent.with-alpha(0.16) : T.tile-hover;
+                        hi := Text {
+                            x: 10px;
+                            height: parent.height;
+                            text: "Say hi";
+                            color: T.soft ? T.accent : T.ink;
+                            font-size: 12px;
+                            font-weight: 600;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+                if root.compact-kind != 15 : Muted {
+                    text: root.visitor != "" ? "Visiting" : root.pet-away ? "Away" : "Asleep";
                 }
             }
         }
@@ -1612,20 +1693,33 @@ export component Island inherits Window {
             // ---- header: only when there's more than one thing to look at ----
             // the highlight under the open tab slides from tab to tab
             if root.show-header && root.panels.length > 1 : Rectangle {
-                x: root.panel-index * 28px;
+                x: root.panel-index * 30px;
                 animate x { duration: root.reduce-motion ? 0ms : 320ms; easing: ease-out-back; }
                 y: 0;
                 width: 24px;
                 height: 24px;
                 border-radius: 12px;
-                background: T.tile-hover;
+                // Soft Bento tints it with the accent so the open tab stands out on the light tiles
+                background: T.soft ? T.accent.with-alpha(0.16) : T.tile-hover;
+            }
+            // and a short bar under it, so which tab is open reads at a glance
+            // (not in Soft Bento: its player tile starts right below the header,
+            // and the accent-tinted tab already marks it)
+            if root.show-header && root.panels.length > 1 && !T.soft : Rectangle {
+                x: root.panel-index * 30px + 7px;
+                animate x { duration: root.reduce-motion ? 0ms : 320ms; easing: ease-out-back; }
+                y: 27px;
+                width: 10px;
+                height: 3px;
+                border-radius: 1.5px;
+                background: T.soft ? T.accent : T.ink;
             }
             if root.show-header : HorizontalLayout {
                 x: 0;
                 y: 0;
                 width: parent.width;
                 height: 24px;
-                spacing: 4px;
+                spacing: 6px; // (the open-tab highlight steps 30 px: 24 + 6)
                 for p in root.panels : Rectangle {
                     width: 24px;
                     height: 24px;
@@ -1638,7 +1732,7 @@ export component Island inherits Window {
                         height: 14px;
                         x: 5px;
                         y: 5px;
-                        fill: root.panel == p ? T.ink : T.muted;
+                        fill: root.panel == p ? (T.soft ? T.accent : T.ink) : T.muted;
                     }
                     if p == 1 : LineIcon {
                         d: Icons.shelf;
@@ -1646,7 +1740,7 @@ export component Island inherits Window {
                         height: 14px;
                         x: 5px;
                         y: 5px;
-                        ink: root.panel == p ? T.ink : T.muted;
+                        ink: root.panel == p ? (T.soft ? T.accent : T.ink) : T.muted;
                     }
                     if p == 6 : Icon {
                         d: Icons.bell;
@@ -1689,7 +1783,7 @@ export component Island inherits Window {
                         height: 14px;
                         x: 5px;
                         y: 5px;
-                        fill: root.panel == p ? T.ink : T.muted;
+                        fill: root.panel == p ? (T.soft ? T.accent : T.ink) : T.muted;
                     }
                     if p == 3 : Ring {
                         x: 3px;
@@ -1705,7 +1799,7 @@ export component Island inherits Window {
                         viewbox-width: 24;
                         viewbox-height: 24;
                         fill: transparent;
-                        stroke: root.panel == p ? T.ink : T.muted;
+                        stroke: root.panel == p ? (T.soft ? T.accent : T.ink) : T.muted;
                         stroke-width: 2px;
                         stroke-line-cap: round;
                         commands: "M9 4 L9 20 M15 4 L15 20 M4 9 L20 9 M4 15 L20 15";
@@ -1751,13 +1845,14 @@ export component Island inherits Window {
                     vertical-alignment: center;
                     wrap: no-wrap;
                 }
-                if root.header-clock != "" && root.has-battery && root.panel != 2 : Rectangle { width: 4px; }
                 // (hidden on the battery panel itself, which shows it large)
                 if root.has-battery && root.panel != 2 : BatteryRing {
                     y: 1px;
                     level: root.battery-level;
                     tint: root.battery-tint;
                 }
+                // the actions stand apart from the clock and battery
+                Rectangle { width: 2px; }
                 // pin: keep the island open
                 Rectangle {
                     width: 24px;
@@ -1837,7 +1932,7 @@ export component Island inherits Window {
                 opacity: max(0, 1 - abs(self.x / 1px) / 160);
                 y: root.show-header ? 34px : 0px;
                 width: parent.width;
-                height: root.panel == 6 ? max(1, min(root.notes.length, 3)) * 64px + 40px : root.panel == 5 ? (root.pet-list-open ? 92px + 12px + max(1, min(root.nearby.length, 2)) * 40px : 92px) : root.panel == 4 ? 228px : root.panel == 3 ? 96px : root.panel == 2 ? 56px : root.panel == 1 ? (root.drag-hover ? 120px : root.shelf-items.length == 0 ? 164px : 144px) : root.panel == 7 ? 204px : (root.has-media ? 130px + (root.media-volume >= 0 ? 30px : 0px) + (root.media-list.length > 0 ? 8px + min(root.media-list.length, 2) * 44px : 0px) : 80px);
+                height: root.panel == 6 ? max(1, min(root.notes.length, 3)) * 64px + 40px : root.panel == 5 ? (root.pet-list-open ? 92px + 12px + max(1, min(root.nearby.length, 2)) * 40px : 92px) : root.panel == 4 ? 228px : root.panel == 3 ? 96px : root.panel == 2 ? 56px : root.panel == 1 ? (root.drag-hover ? 120px : root.shelf-items.length == 0 ? 164px : 144px) : root.panel == 7 ? 204px : (root.has-media ? root.media-h : 80px);
 
                 // ---------- notifications ----------
                 if root.panel == 6 : Rectangle {
@@ -2055,6 +2150,7 @@ export component Island inherits Window {
                             height: 36px;
                             border-radius: T.tile-r;
                             background: T.tile;
+                            if T.soft : GlassEdge { r: T.tile-r; }
                             PetGlyph { x: 10px; y: 8px; width: 20px; height: 20px; awake: true; head: T.rose; tint: #000000; look: false; }
                             Text {
                                 x: 38px;
@@ -2311,18 +2407,28 @@ export component Island inherits Window {
                 }
 
                 if root.panel == 0 && root.has-media : Rectangle {
+                    // Soft Bento: the player sits on its own tile
+                    if T.soft : Rectangle {
+                        x: -8px;
+                        y: -2px;
+                        width: parent.width + 16px;
+                        height: root.media-tile-bottom + 2px;
+                        border-radius: 18px;
+                        background: T.tile;
+                        GlassEdge { r: 18px; }
+                    }
                     // top row: art · meta · wave; art and title take you to the player
                     TouchArea {
                         x: 0;
-                        y: 0;
-                        width: parent.width - 35px;
+                        y: root.media-sp;
+                        width: parent.width - 35px - root.arrow-room;
                         height: 56px;
                         mouse-cursor: pointer;
                         clicked => { root.media-open-current(); }
                     }
                     Rectangle {
                         x: 0;
-                        y: 0;
+                        y: root.media-sp;
                         width: 56px;
                         height: 56px;
                         border-radius: T.tile-r;
@@ -2346,8 +2452,8 @@ export component Island inherits Window {
                     }
                     Text {
                         x: 68px;
-                        y: 8px;
-                        width: parent.width - 68px - 35px;
+                        y: 8px + root.media-sp;
+                        width: parent.width - 68px - 35px - root.arrow-room;
                         text: root.track-title;
                         color: T.ink;
                         font-size: 15px;
@@ -2356,16 +2462,16 @@ export component Island inherits Window {
                     }
                     Text {
                         x: 68px;
-                        y: 30px;
-                        width: parent.width - 68px - 35px;
+                        y: 30px + root.media-sp;
+                        width: parent.width - 68px - 35px - root.arrow-room;
                         text: root.subtitle;
                         color: T.muted;
                         font-size: 13px;
                         overflow: elide;
                     }
                     Wave {
-                        x: parent.width - self.width;
-                        y: 20px;
+                        x: parent.width - self.width - root.arrow-room;
+                        y: 20px + root.media-sp;
                         levels: root.wave;
                         tint: root.art-tint;
                         ms: root.reduce-motion ? 0ms : root.wave-ms;
@@ -2374,31 +2480,33 @@ export component Island inherits Window {
                     // progress
                     if root.has-timeline : Rectangle {
                         x: 0;
-                        y: 68px;
+                        y: 68px + root.media-sp;
                         width: parent.width;
                         height: 14px;
+                        // times grow a column for tracks of an hour or more ("1:09:32")
+                        property <length> time-w: root.duration.character-count > 5 || root.elapsed.character-count > 5 ? 46px : 33px;
                         Text {
                             x: 0;
-                            width: 30px;
+                            width: parent.time-w;
                             text: root.elapsed;
                             color: T.muted;
-                            font-size: 11px;
+                            font-size: 12px;
                             vertical-alignment: center;
                             height: parent.height;
                         }
                         Track {
-                            x: 38px;
+                            x: parent.time-w + 6px;
                             y: 5px;
-                            width: parent.width - 76px;
+                            width: parent.width - 2 * (parent.time-w + 6px);
                             value: root.progress;
                             fill: root.art-tint;
                         }
                         Text {
-                            x: parent.width - 30px;
-                            width: 30px;
+                            x: parent.width - parent.time-w;
+                            width: parent.time-w;
                             text: root.duration;
                             color: T.muted;
-                            font-size: 11px;
+                            font-size: 12px;
                             horizontal-alignment: right;
                             vertical-alignment: center;
                             height: parent.height;
@@ -2408,7 +2516,7 @@ export component Island inherits Window {
                     // controls
                     HorizontalLayout {
                         x: 0;
-                        y: 90px;
+                        y: 90px - root.media-lift + root.media-sp;
                         width: parent.width;
                         height: 40px;
                         spacing: 8px;
@@ -2435,7 +2543,7 @@ export component Island inherits Window {
                     // lyrics for this song: found / plain / none, tap to open
                     if root.lyric-state != 0 : LyricChip {
                         x: parent.width - self.width;
-                        y: 98px;
+                        y: 98px - root.media-lift + root.media-sp;
                         state: root.lyric-state;
                         tint: root.art-tint;
                         open => { root.select-panel(4); }
@@ -2443,7 +2551,7 @@ export component Island inherits Window {
                     // the player's app volume (like Windows' Volume mixer)
                     if root.media-volume >= 0 : Rectangle {
                         x: 0;
-                        y: 136px;
+                        y: root.media-base + 6px;
                         width: parent.width;
                         height: 24px;
                         Icon {
@@ -2477,7 +2585,7 @@ export component Island inherits Window {
                     // the other media, playing or paused: play / pause, volume, tap to go to it
                     if root.media-list.length > 0 : Flickable {
                         x: 0;
-                        y: root.media-volume >= 0 ? 168px : 138px;
+                        y: root.media-base + (root.media-volume >= 0 ? 38px : 8px);
                         width: parent.width;
                         height: min(root.media-list.length, 2) * 44px;
                         content-height: root.media-list.length * 44px;
@@ -2488,6 +2596,7 @@ export component Island inherits Window {
                             border-radius: 10px;
                             background: row-ta.has-hover || row-ta.pressed ? T.tile-hover : T.tile;
                             animate background { duration: 90ms; }
+                            if T.soft : GlassEdge { r: 10px; }
                             row-ta := TouchArea {
                                 mouse-cursor: pointer;
                                 clicked => { root.media-open(k); }
@@ -2848,6 +2957,7 @@ export component Island inherits Window {
                             border-radius: T.tile-r;
                             background: tile-ta.has-hover || tile-ta.pressed ? T.tile-hover : T.tile;
                             animate background { duration: root.instant; }
+                            if T.soft : GlassEdge { r: T.tile-r; }
 
                             Image {
                                 visible: item.has-icon;
